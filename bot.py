@@ -200,7 +200,7 @@ def crea_tastiera_fisica(user_id):
         tastiera.append([KeyboardButton("🔄 Ripristina"), KeyboardButton("📊 Statistiche")])
         tastiera.append([KeyboardButton("👥 Gestisci Richieste")])  # NUOVO!
 
-    return ReplyKeyboardMarkup(tastiera, resize_keyboard=True, persistent=True)
+    return ReplyKeyboardMarkup(tastiera, resize_keyboard=True, is_persistent=True)
 
 # === HANDLER START CORRETTO ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -428,5 +428,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
