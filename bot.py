@@ -198,15 +198,6 @@ def get_categorie_con_articoli(stato=None):
     conn.close()
     return result
 
-def get_categorie_con_fuori_uso():
-    """Restituisce le categorie che hanno articoli fuori uso"""
-    conn = sqlite3.connect('autoprotettori_v3.db')
-    c = conn.cursor()
-    c.execute('''SELECT DISTINCT categoria FROM articoli WHERE stato = 'fuori_uso' ''')
-    result = [row[0] for row in c.fetchall()]
-    conn.close()
-    return result
-
 def organizza_articoli_per_categoria(articoli):
     """Organizza gli articoli per categoria nell'ordine prestabilito"""
     articoli_organizzati = {}
@@ -503,7 +494,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(msg)
 
-    # FUORI USO - SOLO VISUALIZZAZIONE PER UTENTI NORMALI
+    # FUORI USO - CORRETTO: PER CREARE FUORI USO
     elif text == "⚫ Fuori Uso":
         # Per utenti normali: solo visualizzazione
         if not is_admin(user_id):
@@ -527,20 +518,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(msg)
             return
 
-        # Per admin: prima mostra categorie con articoli fuori uso
-        categorie_con_fuori_uso = get_categorie_con_fuori_uso()
+        # Per admin: CREARE FUORI USO - prima mostra categorie con articoli disponibili/usati
+        categorie_con_articoli = get_categorie_con_articoli('disponibile') + get_categorie_con_articoli('usato')
+        categorie_con_articoli = list(set(categorie_con_articoli))  # Rimuovi duplicati
         
-        if not categorie_con_fuori_uso:
-            await update.message.reply_text("⚫ Nessun articolo fuori uso")
+        if not categorie_con_articoli:
+            await update.message.reply_text("⚫ Nessun articolo da segnare come fuori uso")
             return
 
         keyboard = []
-        for categoria in categorie_con_fuori_uso:
+        for categoria in categorie_con_articoli:
             if categoria in CATEGORIE:
-                keyboard.append([InlineKeyboardButton(CATEGORIE[categoria], callback_data=f"fuori_uso_cat_{categoria}")])
+                keyboard.append([InlineKeyboardButton(CATEGORIE[categoria], callback_data=f"crea_fuori_uso_cat_{categoria}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("⚫ Seleziona categoria per gestire FUORI USO:", reply_markup=reply_markup)
+        await update.message.reply_text("⚫ Seleziona categoria per SEGNARE come FUORI USO:", reply_markup=reply_markup)
 
     # AGGIUNGI (solo admin)
     elif text == "➕ Aggiungi" and is_admin(user_id):
@@ -680,18 +672,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_stato(seriale, "usato")
         await query.edit_message_text(f"🔴 {seriale} segnato come USATO ✅")
 
-    # SEGNA FUORI USO - SELEZIONE CATEGORIA (PER ADMIN)
-    elif data.startswith("fuori_uso_cat_"):
+    # CREA FUORI USO - SELEZIONE CATEGORIA (PER ADMIN)
+    elif data.startswith("crea_fuori_uso_cat_"):
         if not is_admin(user_id):
             await query.answer("❌ Solo gli amministratori possono mettere articoli fuori uso!", show_alert=True)
             return
             
-        categoria = data[14:]
-        articoli_fuori_uso = get_articoli_per_stato('fuori_uso')
-        articoli_categoria = [a for a in articoli_fuori_uso if a[1] == categoria]
+        categoria = data[19:]
+        articoli_disponibili = get_articoli_per_stato('disponibile')
+        articoli_usati = get_articoli_per_stato('usato')
+        articoli_categoria = [a for a in articoli_disponibili + articoli_usati if a[1] == categoria]
         
         if not articoli_categoria:
-            await query.edit_message_text(f"❌ Nessun articolo fuori uso per {CATEGORIE[categoria]}")
+            await query.edit_message_text(f"❌ Nessun articolo per {CATEGORIE[categoria]}")
             return
 
         keyboard = []
@@ -700,7 +693,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton(nome, callback_data=f"fuori_uso_{seriale}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(f"⚫ Articoli {CATEGORIE[categoria]} FUORI USO:", reply_markup=reply_markup)
+        await query.edit_message_text(f"⚫ Seleziona {CATEGORIE[categoria]} da segnare come FUORI USO:", reply_markup=reply_markup)
 
     # SEGNA FUORI USO - CONFERMA
     elif data.startswith("fuori_uso_"):
