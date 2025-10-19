@@ -301,7 +301,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(welcome_text, reply_markup=crea_tastiera_fisica(user_id))
 
-# === GESTIONE RICHIESTE ACCESSO ===
+# === GESTIONE RICHIESTE ACCESSO UNO ALLA VOLTA ===
 async def gestisci_richieste(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id):
@@ -309,21 +309,35 @@ async def gestisci_richieste(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     richieste = get_richieste_in_attesa()
     if not richieste:
-        await update.message.reply_text("✅ Nessuna richiesta in sospeso.")
+        await update.message.reply_text("✅ Nessuna richiesta di accesso in sospeso.")
         return
 
-    keyboard = []
-    for richiesta in richieste:
-        user_id_rich, username, nome, data_richiesta = richiesta
-        data = data_richiesta.split()[0] if data_richiesta else "N/A"
-        testo = f"{nome} (@{username}) - {data}"
-        keyboard.append([
+    # Prendi solo la PRIMA richiesta
+    prima_richiesta = richieste[0]
+    user_id_rich, username, nome, data_richiesta = prima_richiesta
+    data = data_richiesta.split()[0] if data_richiesta else "N/A"
+    
+    keyboard = [
+        [
             InlineKeyboardButton("✅ Approva", callback_data=f"approva_{user_id_rich}"),
             InlineKeyboardButton("❌ Rifiuta", callback_data=f"rifiuta_{user_id_rich}")
-        ])
+        ]
+    ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("👥 RICHIESTE IN SOSPESO:", reply_markup=reply_markup)
+    
+    richieste_rimanenti = len(richieste) - 1
+    info_rimanenti = f"\n\n📋 Richieste rimanenti in attesa: {richieste_rimanenti}" if richieste_rimanenti > 0 else ""
+    
+    await update.message.reply_text(
+        f"👤 **RICHIESTA ACCESSO DA APPROVARE**\n\n"
+        f"🆔 **ID:** {user_id_rich}\n"
+        f"👤 **Nome:** {nome}\n"
+        f"📱 **Username:** @{username}\n"
+        f"📅 **Data richiesta:** {data}\n\n"
+        f"Seleziona un'azione:{info_rimanenti}",
+        reply_markup=reply_markup
+    )
 
 # === HANDLER MESSAGGI PRINCIPALE ===
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -401,8 +415,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
         await update.message.reply_text(msg)
 
-    # FUORI USO
+    # FUORI USO - SOLO VISUALIZZAZIONE PER UTENTI NORMALI
     elif text == "⚫ Fuori Uso":
+        # Per utenti normali: solo visualizzazione
+        if not is_admin(user_id):
+            articoli_fuori_uso = get_articoli_per_stato('fuori_uso')
+            if not articoli_fuori_uso:
+                await update.message.reply_text("⚫ Nessun articolo fuori uso")
+                return
+            
+            msg = f"⚫ ARTICOLI FUORI USO ({len(articoli_fuori_uso)})\n\n"
+            for seriale, cat, sed in articoli_fuori_uso:
+                msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
+            
+            msg += "\nℹ️ Solo gli amministratori possono modificare lo stato."
+            await update.message.reply_text(msg)
+            return
+
+        # Per admin: gestione completa
         articoli_disponibili = get_articoli_per_stato('disponibile')
         articoli_usati = get_articoli_per_stato('usato')
         articoli = articoli_disponibili + articoli_usati
@@ -544,8 +574,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_stato(seriale, "usato")
         await query.edit_message_text(f"🔴 {seriale} segnato come USATO ✅")
 
-    # SEGNA FUORI USO
+    # SEGNA FUORI USO (solo admin può usare questo bottone)
     elif data.startswith("fuori_uso_"):
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono mettere articoli fuori uso!", show_alert=True)
+            return
+            
         seriale = data[10:]
         update_stato(seriale, "fuori_uso")
         await query.edit_message_text(f"⚫ {seriale} segnato come FUORI USO ✅")
@@ -556,7 +590,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_stato(seriale, "disponibile")
         await query.edit_message_text(f"🔄 {seriale} ripristinato a DISPONIBILE ✅")
 
-    # APPROVA UTENTE
+    # APPROVA UTENTE (UNO ALLA VOLTA)
     elif data.startswith("approva_"):
         if not is_admin(user_id):
             return
@@ -567,14 +601,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 user_id_approvare,
-                "✅ ACCESSO APPROVATO! Ora puoi usare il bot."
+                "✅ ACCESSO APPROVATO! Ora puoi usare tutte le funzioni del bot.\nUsa /start per iniziare."
             )
         except:
             pass
             
-        await query.edit_message_text(f"✅ Utente {user_id_approvare} approvato!")
+        # Dopo l'approvazione, mostra se ci sono altre richieste
+        richieste_rimanenti = get_richieste_in_attesa()
+        if richieste_rimanenti:
+            messaggio_aggiuntivo = f"\n\n📋 Ci sono ancora {len(richieste_rimanenti)} richieste in attesa.\nUsa nuovamente '👥 Gestisci Richieste' per continuare."
+        else:
+            messaggio_aggiuntivo = "\n\n✅ Tutte le richieste sono state gestite."
+            
+        await query.edit_message_text(f"✅ Utente {user_id_approvare} approvato!{messaggio_aggiuntivo}")
 
-    # RIFIUTA UTENTE
+    # RIFIUTA UTENTE (UNO ALLA VOLTA)
     elif data.startswith("rifiuta_"):
         if not is_admin(user_id):
             return
@@ -585,7 +626,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c.execute("DELETE FROM utenti WHERE user_id = ?", (user_id_rifiutare,))
         conn.commit()
         conn.close()
-        await query.edit_message_text(f"❌ Utente {user_id_rifiutare} rifiutato!")
+        
+        # Dopo il rifiuto, mostra se ci sono altre richieste
+        richieste_rimanenti = get_richieste_in_attesa()
+        if richieste_rimanenti:
+            messaggio_aggiuntivo = f"\n\n📋 Ci sono ancora {len(richieste_rimanenti)} richieste in attesa.\nUsa nuovamente '👥 Gestisci Richieste' per continuare."
+        else:
+            messaggio_aggiuntivo = "\n\n✅ Tutte le richieste sono state gestite."
+            
+        await query.edit_message_text(f"❌ Utente {user_id_rifiutare} rifiutato!{messaggio_aggiuntivo}")
 
     # SELEZIONE CATEGORIA PER AGGIUNTA
     elif data.startswith("nuovo_cat_"):
