@@ -14,11 +14,11 @@ import time
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_IDS = [1816045269, 653425963, 693843502, 6622015744]
 
-# SOGLIE BOMBOLE
+# SOGLIE BOMBOLE (ORA SONO COMBINATE ERBA + CENTRALE)
 SOGLIE_BOMBOLE = {
-    "sotto_scorta": 7,      # <8
-    "allarme_scorta": 8,    # =8  
-    "preallarme": 10        # =10
+    "sotto_scorta": 7,      # <8 (TOTALE Erba + Centrale)
+    "allarme_scorta": 8,    # =8 (TOTALE Erba + Centrale)  
+    "preallarme": 10        # =10 (TOTALE Erba + Centrale)
 }
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -56,16 +56,19 @@ init_db()
 
 # === CATEGORIE E SEDI ===
 CATEGORIE = {
+    "bombola": "⚗️ Bombola",
     "maschera": "🎭 Maschera",
     "erogatore": "💨 Erogatore", 
-    "spallaccio": "🎽 Spallaccio",
-    "bombola": "⚗️ Bombola"
+    "spallaccio": "🎽 Spallaccio"
 }
 
 SEDI = {
     "erba": "🌿 Erba",
     "centrale": "🏢 Centrale"
 }
+
+# ORDINE DELLE CATEGORIE PER L'INVENTARIO
+ORDINE_CATEGORIE = ["bombola", "maschera", "erogatore", "spallaccio"]
 
 # === FUNZIONI UTILITY ===
 def is_admin(user_id):
@@ -171,18 +174,57 @@ def get_tutti_articoli():
     conn.close()
     return result
 
-def conta_bombole_disponibili(sede=None):
+def conta_bombole_disponibili():
+    """CONTA TOTALE BOMBOLE (Erba + Centrale) - NUOVA VERSIONE"""
     conn = sqlite3.connect('autoprotettori_v3.db')
     c = conn.cursor()
-    if sede:
-        c.execute('''SELECT COUNT(*) FROM articoli 
-                     WHERE categoria = 'bombola' AND sede = ? AND stato = 'disponibile' ''', (sede,))
-    else:
-        c.execute('''SELECT COUNT(*) FROM articoli 
-                     WHERE categoria = 'bombola' AND stato = 'disponibile' ''')
+    c.execute('''SELECT COUNT(*) FROM articoli 
+                 WHERE categoria = 'bombola' AND stato = 'disponibile' ''')
     risultato = c.fetchone()[0]
     conn.close()
     return risultato
+
+def get_categorie_con_articoli(stato=None):
+    """Restituisce le categorie che hanno articoli in un determinato stato"""
+    conn = sqlite3.connect('autoprotettori_v3.db')
+    c = conn.cursor()
+    
+    if stato:
+        c.execute('''SELECT DISTINCT categoria FROM articoli WHERE stato = ?''', (stato,))
+    else:
+        c.execute('''SELECT DISTINCT categoria FROM articoli''')
+    
+    result = [row[0] for row in c.fetchall()]
+    conn.close()
+    return result
+
+def get_categorie_con_fuori_uso():
+    """Restituisce le categorie che hanno articoli fuori uso"""
+    conn = sqlite3.connect('autoprotettori_v3.db')
+    c = conn.cursor()
+    c.execute('''SELECT DISTINCT categoria FROM articoli WHERE stato = 'fuori_uso' ''')
+    result = [row[0] for row in c.fetchall()]
+    conn.close()
+    return result
+
+def organizza_articoli_per_categoria(articoli):
+    """Organizza gli articoli per categoria nell'ordine prestabilito"""
+    articoli_organizzati = {}
+    
+    for categoria in ORDINE_CATEGORIE:
+        articoli_organizzati[categoria] = []
+    
+    for articolo in articoli:
+        if len(articolo) == 4:  # (seriale, cat, sede, stato)
+            seriale, cat, sede, stato = articolo
+        else:  # (seriale, cat, sede)
+            seriale, cat, sede = articolo
+            stato = None
+            
+        if cat in articoli_organizzati:
+            articoli_organizzati[cat].append((seriale, sede, stato))
+    
+    return articoli_organizzati
 
 # === SISTEMA KEEP-ALIVE ===
 def keep_alive():
@@ -349,49 +391,77 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await start(update, context)
         return
 
-    # INVENTARIO
+    # INVENTARIO - NUOVA VERSIONE ORGANIZZATA
     elif text == "📋 Inventario":
         articoli = get_tutti_articoli()
         if not articoli:
             await update.message.reply_text("📦 Inventario vuoto")
             return
 
-        msg = "📋 INVENTARIO COMPLETO\n\n"
+        msg = "📋 **INVENTARIO COMPLETO**\n\n"
+        
+        # ORGANIZZA PER STATO E CATEGORIA
         disponibili = [a for a in articoli if a[3] == 'disponibile']
-        if disponibili:
-            msg += f"🟢 DISPONIBILI ({len(disponibili)}):\n"
-            for seriale, cat, sed, stato in disponibili:
-                msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
-            msg += "\n"
-        
         usati = [a for a in articoli if a[3] == 'usato']
-        if usati:
-            msg += f"🔴 USATI ({len(usati)}):\n"
-            for seriale, cat, sed, stato in usati:
-                msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
+        fuori_uso = [a for a in articoli if a[3] == 'fuori_uso']
+        
+        # DISPONIBILI
+        if disponibili:
+            msg += f"🟢 **DISPONIBILI** ({len(disponibili)}):\n"
+            disponibili_organizzati = organizza_articoli_per_categoria(disponibili)
+            
+            for categoria in ORDINE_CATEGORIE:
+                articoli_cat = disponibili_organizzati[categoria]
+                if articoli_cat:
+                    msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                    for seriale, sede, _ in articoli_cat:
+                        msg += f"• {seriale} - {SEDI[sede]}\n"
             msg += "\n"
         
-        fuori_uso = [a for a in articoli if a[3] == 'fuori_uso']
-        if fuori_uso:
-            msg += f"⚫ FUORI USO ({len(fuori_uso)}):\n"
-            for seriale, cat, sed, stato in fuori_uso:
-                msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
+        # USATI
+        if usati:
+            msg += f"🔴 **USATI** ({len(usati)}):\n"
+            usati_organizzati = organizza_articoli_per_categoria(usati)
+            
+            for categoria in ORDINE_CATEGORIE:
+                articoli_cat = usati_organizzati[categoria]
+                if articoli_cat:
+                    msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                    for seriale, sede, _ in articoli_cat:
+                        msg += f"• {seriale} - {SEDI[sede]}\n"
+            msg += "\n"
         
+        # FUORI USO
+        if fuori_uso:
+            msg += f"⚫ **FUORI USO** ({len(fuori_uso)}):\n"
+            fuori_uso_organizzati = organizza_articoli_per_categoria(fuori_uso)
+            
+            for categoria in ORDINE_CATEGORIE:
+                articoli_cat = fuori_uso_organizzati[categoria]
+                if articoli_cat:
+                    msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                    for seriale, sede, _ in articoli_cat:
+                        msg += f"• {seriale} - {SEDI[sede]}\n"
+        
+        msg += f"\n📊 **Totale articoli:** {len(articoli)}"
         await update.message.reply_text(msg)
 
-    # SEGNA USATO
+    # SEGNA USATO - NUOVA VERSIONE CON SELEZIONE CATEGORIA
     elif text == "🔴 Segna Usato":
-        articoli = get_articoli_per_stato('disponibile')
-        if not articoli:
+        # Prima mostra le categorie che hanno articoli disponibili
+        categorie_con_articoli = get_categorie_con_articoli('disponibile')
+        
+        if not categorie_con_articoli:
             await update.message.reply_text("✅ Nessun articolo da segnare come usato")
             return
 
         keyboard = []
-        for seriale, cat, sed in articoli:
-            nome = f"{seriale} - {CATEGORIE[cat]} - {SEDI[sed]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"usato_{seriale}")])
+        for categoria in categorie_con_articoli:
+            if categoria in CATEGORIE:
+                keyboard.append([InlineKeyboardButton(CATEGORIE[categoria], callback_data=f"usato_cat_{categoria}")])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("🔴 Seleziona articolo da segnare come USATO:", reply_markup=reply_markup)
+        await update.message.reply_text("🔴 Seleziona categoria per segnare come USATO:", reply_markup=reply_markup)
 
     # DISPONIBILI
     elif text == "🟢 Disponibili":
@@ -399,9 +469,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not articoli:
             await update.message.reply_text("🟢 Nessun articolo disponibile")
             return
-        msg = f"🟢 ARTICOLI DISPONIBILI ({len(articoli)})\n\n"
-        for seriale, cat, sed in articoli:
-            msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
+        
+        msg = f"🟢 **ARTICOLI DISPONIBILI** ({len(articoli)})\n\n"
+        articoli_organizzati = organizza_articoli_per_categoria([(a[0], a[1], a[2], 'disponibile') for a in articoli])
+        
+        for categoria in ORDINE_CATEGORIE:
+            articoli_cat = articoli_organizzati[categoria]
+            if articoli_cat:
+                msg += f"**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                for seriale, sede, _ in articoli_cat:
+                    msg += f"• {seriale} - {SEDI[sede]}\n"
+                msg += "\n"
+        
         await update.message.reply_text(msg)
 
     # USATI
@@ -410,9 +489,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not articoli:
             await update.message.reply_text("🔴 Nessun articolo usato")
             return
-        msg = f"🔴 ARTICOLI USATI ({len(articoli)})\n\n"
-        for seriale, cat, sed in articoli:
-            msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
+        
+        msg = f"🔴 **ARTICOLI USATI** ({len(articoli)})\n\n"
+        articoli_organizzati = organizza_articoli_per_categoria([(a[0], a[1], a[2], 'usato') for a in articoli])
+        
+        for categoria in ORDINE_CATEGORIE:
+            articoli_cat = articoli_organizzati[categoria]
+            if articoli_cat:
+                msg += f"**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                for seriale, sede, _ in articoli_cat:
+                    msg += f"• {seriale} - {SEDI[sede]}\n"
+                msg += "\n"
+        
         await update.message.reply_text(msg)
 
     # FUORI USO - SOLO VISUALIZZAZIONE PER UTENTI NORMALI
@@ -424,29 +512,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("⚫ Nessun articolo fuori uso")
                 return
             
-            msg = f"⚫ ARTICOLI FUORI USO ({len(articoli_fuori_uso)})\n\n"
-            for seriale, cat, sed in articoli_fuori_uso:
-                msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
+            msg = f"⚫ **ARTICOLI FUORI USO** ({len(articoli_fuori_uso)})\n\n"
+            articoli_organizzati = organizza_articoli_per_categoria([(a[0], a[1], a[2], 'fuori_uso') for a in articoli_fuori_uso])
             
-            msg += "\nℹ️ Solo gli amministratori possono modificare lo stato."
+            for categoria in ORDINE_CATEGORIE:
+                articoli_cat = articoli_organizzati[categoria]
+                if articoli_cat:
+                    msg += f"**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                    for seriale, sede, _ in articoli_cat:
+                        msg += f"• {seriale} - {SEDI[sede]}\n"
+                    msg += "\n"
+            
+            msg += "ℹ️ Solo gli amministratori possono modificare lo stato."
             await update.message.reply_text(msg)
             return
 
-        # Per admin: gestione completa
-        articoli_disponibili = get_articoli_per_stato('disponibile')
-        articoli_usati = get_articoli_per_stato('usato')
-        articoli = articoli_disponibili + articoli_usati
-
-        if not articoli:
-            await update.message.reply_text("⚫ Nessun articolo da segnare come fuori uso")
+        # Per admin: prima mostra categorie con articoli fuori uso
+        categorie_con_fuori_uso = get_categorie_con_fuori_uso()
+        
+        if not categorie_con_fuori_uso:
+            await update.message.reply_text("⚫ Nessun articolo fuori uso")
             return
 
         keyboard = []
-        for seriale, cat, sed in articoli:
-            nome = f"{seriale} - {CATEGORIE[cat]} - {SEDI[sed]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"fuori_uso_{seriale}")])
+        for categoria in categorie_con_fuori_uso:
+            if categoria in CATEGORIE:
+                keyboard.append([InlineKeyboardButton(CATEGORIE[categoria], callback_data=f"fuori_uso_cat_{categoria}")])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("⚫ Seleziona articolo da segnare come FUORI USO:", reply_markup=reply_markup)
+        await update.message.reply_text("⚫ Seleziona categoria per gestire FUORI USO:", reply_markup=reply_markup)
 
     # AGGIUNGI (solo admin)
     elif text == "➕ Aggiungi" and is_admin(user_id):
@@ -487,7 +581,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("🔄 Seleziona articolo da ripristinare:", reply_markup=reply_markup)
 
-    # STATISTICHE (solo admin)
+    # STATISTICHE (solo admin) - NUOVA VERSIONE CON BOMBOLE COMBINATE
     elif text == "📊 Statistiche" and is_admin(user_id):
         articoli = get_tutti_articoli()
         totale = len(articoli)
@@ -495,31 +589,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         usati = len([a for a in articoli if a[3] == 'usato'])
         fuori_uso = len([a for a in articoli if a[3] == 'fuori_uso'])
 
-        bombole_erba = conta_bombole_disponibili('erba')
-        bombole_centrale = conta_bombole_disponibili('centrale')
+        # NUOVO: BOMBOLE COMBINATE (Erba + Centrale)
+        bombole_totali = conta_bombole_disponibili()
 
-        msg = "📊 STATISTICHE COMPLETE\n\n"
-        msg += f"📦 Totale articoli: {totale}\n"
-        msg += f"🟢 Disponibili: {disponibili}\n"
-        msg += f"🔴 Usati: {usati}\n"
-        msg += f"⚫ Fuori uso: {fuori_uso}\n\n"
+        msg = "📊 **STATISTICHE COMPLETE**\n\n"
+        msg += f"📦 **Totale articoli:** {totale}\n"
+        msg += f"🟢 **Disponibili:** {disponibili}\n"
+        msg += f"🔴 **Usati:** {usati}\n"
+        msg += f"⚫ **Fuori uso:** {fuori_uso}\n\n"
 
-        msg += "⚗️ BOMBOLE DISPONIBILI:\n"
-        msg += f"🌿 Erba: {bombole_erba}"
-        if bombole_erba < SOGLIE_BOMBOLE["sotto_scorta"]:
-            msg += " 🚨 SOTTO SCORTA!"
-        elif bombole_erba < SOGLIE_BOMBOLE["scorta_bassa"]:
-            msg += " 🟡 Scorta bassa"
+        msg += "⚗️ **BOMBOLE DISPONIBILI (TOTALE):**\n"
+        msg += f"🌿🏢 **Combinate (Erba + Centrale):** {bombole_totali}"
+        if bombole_totali <= SOGLIE_BOMBOLE["sotto_scorta"]:
+            msg += " 🚨 **SOTTO SCORTA!**"
+        elif bombole_totali <= SOGLIE_BOMBOLE["allarme_scorta"]:
+            msg += " 🟡 **ALLARME SCORTA!**"
+        elif bombole_totali <= SOGLIE_BOMBOLE["preallarme"]:
+            msg += " 🔶 **PREALLARME!**"
         else:
-            msg += " ✅ Ok"
-
-        msg += f"\n🏢 Centrale: {bombole_centrale}"
-        if bombole_centrale < SOGLIE_BOMBOLE["sotto_scorta"]:
-            msg += " 🚨 SOTTO SCORTA!"
-        elif bombole_centrale < SOGLIE_BOMBOLE["scorta_bassa"]:
-            msg += " 🟡 Scorta bassa"
-        else:
-            msg += " ✅ Ok"
+            msg += " ✅ **Ok**"
 
         await update.message.reply_text(msg)
 
@@ -550,7 +638,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             
             if categoria == 'bombola':
-                await controlla_allarme_bombole(context, sede)
+                await controlla_allarme_bombole(context)
         else:
             await update.message.reply_text(f"❌ {seriale} già esistente!")
         
@@ -568,13 +656,53 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = query.from_user.id
 
-    # SEGNA USATO
-    if data.startswith("usato_"):
+    # SEGNA USATO - SELEZIONE CATEGORIA
+    if data.startswith("usato_cat_"):
+        categoria = data[10:]
+        articoli = get_articoli_per_stato('disponibile')
+        articoli_categoria = [a for a in articoli if a[1] == categoria]
+        
+        if not articoli_categoria:
+            await query.edit_message_text(f"❌ Nessun articolo disponibile per {CATEGORIE[categoria]}")
+            return
+
+        keyboard = []
+        for seriale, cat, sed in articoli_categoria:
+            nome = f"{seriale} - {SEDI[sed]}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"usato_{seriale}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(f"🔴 Seleziona {CATEGORIE[categoria]} da segnare come USATO:", reply_markup=reply_markup)
+
+    # SEGNA USATO - CONFERMA
+    elif data.startswith("usato_"):
         seriale = data[6:]
         update_stato(seriale, "usato")
         await query.edit_message_text(f"🔴 {seriale} segnato come USATO ✅")
 
-    # SEGNA FUORI USO (solo admin può usare questo bottone)
+    # SEGNA FUORI USO - SELEZIONE CATEGORIA (PER ADMIN)
+    elif data.startswith("fuori_uso_cat_"):
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono mettere articoli fuori uso!", show_alert=True)
+            return
+            
+        categoria = data[14:]
+        articoli_fuori_uso = get_articoli_per_stato('fuori_uso')
+        articoli_categoria = [a for a in articoli_fuori_uso if a[1] == categoria]
+        
+        if not articoli_categoria:
+            await query.edit_message_text(f"❌ Nessun articolo fuori uso per {CATEGORIE[categoria]}")
+            return
+
+        keyboard = []
+        for seriale, cat, sed in articoli_categoria:
+            nome = f"{seriale} - {SEDI[sed]}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"fuori_uso_{seriale}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(f"⚫ Articoli {CATEGORIE[categoria]} FUORI USO:", reply_markup=reply_markup)
+
+    # SEGNA FUORI USO - CONFERMA
     elif data.startswith("fuori_uso_"):
         if not is_admin(user_id):
             await query.answer("❌ Solo gli amministratori possono mettere articoli fuori uso!", show_alert=True)
@@ -694,27 +822,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"❌ {seriale} non trovato!")
 
 # === ALLARME BOMBOLE ===
-async def controlla_allarme_bombole(context: ContextTypes.DEFAULT_TYPE, sede=None):
-    conn = sqlite3.connect('autoprotettori_v3.db')
-    c = conn.cursor()
-    
-    if sede:
-        c.execute('''SELECT COUNT(*) FROM articoli 
-                     WHERE categoria = 'bombola' AND sede = ? AND stato = 'disponibile' ''', (sede,))
-    else:
-        c.execute('''SELECT COUNT(*) FROM articoli 
-                     WHERE categoria = 'bombola' AND stato = 'disponibile' ''')
-    
-    count = c.fetchone()[0]
-    conn.close()
+async def controlla_allarme_bombole(context: ContextTypes.DEFAULT_TYPE):
+    """NUOVA VERSIONE: controlla allarme basato su TOTALE bombole (Erba + Centrale)"""
+    bombole_totali = conta_bombole_disponibili()
 
     messaggio = None
-    if count <= SOGLIE_BOMBOLE["sotto_scorta"]:
-        messaggio = f"🚨 SOTTO SCORTA BOMBOLE! Solo {count} disponibili!"
-    elif count == SOGLIE_BOMBOLE["allarme_scorta"]:
-        messaggio = f"🟡 ALLARME SCORTA BOMBOLE! Solo {count} disponibili!"
-    elif count == SOGLIE_BOMBOLE["preallarme"]:
-        messaggio = f"🔶 PREALLARME SCORTA BOMBOLE! Solo {count} disponibili!"
+    if bombole_totali <= SOGLIE_BOMBOLE["sotto_scorta"]:
+        messaggio = f"🚨 SOTTO SCORTA BOMBOLE! Solo {bombole_totali} disponibili in totale (Erba + Centrale)!"
+    elif bombole_totali <= SOGLIE_BOMBOLE["allarme_scorta"]:
+        messaggio = f"🟡 ALLARME SCORTA BOMBOLE! Solo {bombole_totali} disponibili in totale!"
+    elif bombole_totali <= SOGLIE_BOMBOLE["preallarme"]:
+        messaggio = f"🔶 PREALLARME SCORTA BOMBOLE! Solo {bombole_totali} disponibili in totale!"
 
     if messaggio:
         for admin_id in ADMIN_IDS:
