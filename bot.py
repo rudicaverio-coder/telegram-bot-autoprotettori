@@ -12,7 +12,7 @@ import threading
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_IDS = [1816045269, 653425963, 693843502, 6622015744]
 
-# SOGLIE CORRETTE PER BOMBOLE
+# SOGLIE BOMBOLE
 SOGLIE_BOMBOLE = {
     "sotto_scorta": 7,      # <8
     "allarme_scorta": 8,    # =8  
@@ -100,6 +100,16 @@ def approva_utente(user_id):
     conn.close()
 
 # === FUNZIONI ARTICOLI ===
+def get_prefisso_categoria(categoria):
+    """Restituisce il prefisso automatico per ogni categoria"""
+    prefissi = {
+        "maschera": "MAS",
+        "erogatore": "ER", 
+        "spallaccio": "SPAL",
+        "bombola": "BOMB"
+    }
+    return prefissi.get(categoria, "ART")
+
 def insert_articolo(seriale, categoria, sede, stato="disponibile"):
     conn = sqlite3.connect('autoprotettori_v3.db')
     c = conn.cursor()
@@ -143,6 +153,14 @@ def get_articoli_per_stato(stato):
     conn.close()
     return result
 
+def get_articoli_per_categoria(categoria):
+    conn = sqlite3.connect('autoprotettori_v3.db')
+    c = conn.cursor()
+    c.execute("SELECT seriale, categoria, sede, stato FROM articoli WHERE categoria = ?", (categoria,))
+    result = c.fetchall()
+    conn.close()
+    return result
+
 def get_tutti_articoli():
     conn = sqlite3.connect('autoprotettori_v3.db')
     c = conn.cursor()
@@ -167,45 +185,63 @@ def conta_bombole_disponibili(sede=None):
 # === FUNZIONE HELP ===
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if not is_user_approved(user_id):
-        await update.message.reply_text("Per utilizzare il bot, devi prima richiedere l'accesso.", reply_markup=crea_tastiera_fisica(user_id))
-        return
+    
+    help_text = """
+🤖 **BENVENUTO IN AUTOPROTETTORI ERBA!**
 
-    if is_admin(user_id):
-        help_text = """
-🎭 **GUIDA ADMIN** 👨‍💻
+🎯 **COSA PUOI FARE:**
 
-**FUNZIONI:**
-• 📋 Inventario - Vista completa
-• 🔴 Segna Usato - Marca articoli usati
-• 🟢 Disponibili - Solo articoli disponibili
-• 🔴 Usati - Solo articoli usati
-• ⚫ Fuori Uso - Solo articoli fuori uso
-• ➕ Aggiungi - Inserisci nuovo articolo
-• ➖ Rimuovi - Elimina articolo
-• 🔄 Ripristina - Ripristina articoli usati/fuori uso
-• 📊 Statistiche - Statistiche complete
-• 👥 Gestisci Richieste - Approva nuovi utenti
+👤 **COME UTENTE:**
+• 📋 **Vedere l'inventario** completo
+• 🔴 **Segnare articoli usati** dopo l'utilizzo
+• 🟢 **Controllare disponibilità** in tempo reale
+• 📊 **Monitorare stati** (disponibili/usati/fuori uso)
 
-**SISTEMA BOMBOLE:**
-• 🌿 Bombola Erba
-• 🏢 Bombola Centrale
-• Allarme automatico scorte basse
+👨‍💻 **COME ADMIN:**
+• ➕ **Aggiungere nuovi articoli** all'inventario
+• ➖ **Rimuovere articoli** tramite interfaccia semplice
+• 🔄 **Ripristinare articoli** usati o fuori uso
+• 📈 **Visualizzare statistiche** dettagliate
+• ⚠️ **Ricevere allarmi automatici** per scorte bombole
+• 👥 **Gestire richieste accesso** nuovi utenti
+
+🔧 **CARATTERISTICHE TECNICHE:**
+• ✅ **Sempre online** 24/7
+• ✅ **Interfaccia intuitiva** con pulsanti
+• ✅ **Database sicuro** e persistente
+• ✅ **Allarmi automatici** per scorte basse
+• ✅ **Accesso controllato** e sicuro
+
+⚡ **SISTEMA BOMBOLE INTELLIGENTE:**
+• 🌿 **Bombola Erba** - Monitoraggio separato
+• 🏢 **Bombola Centrale** - Gestione dedicata
+• 🚨 **Allarmi automatici** quando le scorte sono basse
+
+📱 **COME USARE IL BOT:**
+1. Usa i pulsanti in basso per navigare
+2. Segui sempre gli articoli dopo l'uso
+3. Controlla regolarmente le disponibilità
+
+---
+
+🔄 **INFORMAZIONI TECNICHE:**
+
+**COSA SIGNIFICA "SPIN DOWN":**
+✅ **Dopo 15 minuti di inattività** il bot si "addormenta"
+✅ **Al primo messaggio** si riavvia automaticamente (in 20-30 secondi)
+✅ **Non perdi dati** (il database rimane)
+✅ **Completamente gratis**
+
+**ESEMPIO PRATICO:**
+• **Ora 10:00** - Qualcuno usa il bot ✅
+• **Ora 10:15** - Nessun messaggio, il bot si sospende 💤  
+• **Ora 12:00** - Arriva un nuovo messaggio ⏰
+• **Ora 12:00:30** - Bot si riavvia e risponde ✅
+
+**PERCHÉ VA BENE COMUNQUE:**
+I tuoi utenti vedranno solo un piccolo ritardo al primo messaggio dopo inattività
 """
-    else:
-        help_text = """
-🎭 **GUIDA UTENTE** 👤
 
-**FUNZIONI:**
-• 📋 Inventario - Vista completa
-• 🔴 Segna Usato - Marca articoli usati
-• 🟢 Disponibili - Solo articoli disponibili
-• 🔴 Usati - Solo articoli usati
-• ⚫ Fuori Uso - Solo articoli fuori uso
-
-**REGOLA:**
-Segna sempre gli articoli dopo l'uso!
-"""
     await update.message.reply_text(help_text, reply_markup=crea_tastiera_fisica(user_id))
 
 # === TASTIERA FISICA ===
@@ -231,6 +267,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
     
+    # Messaggio di benvenuto migliorato
+    welcome_text = f"""
+🎭 **AUTOPROTETTORI ERBA** 🤖
+
+Ciao {user_name}! Benvenuto nel sistema di gestione autoprotettori.
+
+📍 **Questo bot ti permette di:**
+• Tenere traccia di tutti gli autoprotettori
+• Segnare gli articoli usati in tempo reale  
+• Controllare le disponibilità istantaneamente
+• Monitorare le scorte di bombole
+
+🔒 **Sistema di accesso sicuro:**
+• Solo personale autorizzato
+• Approvazione richiesta per nuovi utenti
+• Differenti permessi per utenti e amministratori
+
+💡 **Usa i pulsanti in basso per iniziare!**
+"""
+    
     conn = sqlite3.connect('autoprotettori_v3.db')
     c = conn.cursor()
     c.execute('''INSERT OR IGNORE INTO utenti (user_id, username, nome, ruolo) 
@@ -245,28 +301,60 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await context.bot.send_message(
                     admin_id,
-                    f"🆕 NUOVA RICHIESTA ACCESSO:\n"
-                    f"User: {user_name} (@{update.effective_user.username})\n"
-                    f"ID: {user_id}\n"
-                    f"Richieste in attesa: {len(richieste)}"
+                    f"🆕 **NUOVA RICHIESTA ACCESSO**\n\n"
+                    f"👤 **Utente:** {user_name}\n"
+                    f"📱 **Username:** @{update.effective_user.username}\n"
+                    f"🆔 **ID:** {user_id}\n"
+                    f"📊 **Richieste in attesa:** {len(richieste)}\n\n"
+                    f"Usa '👥 Gestisci Richieste' per approvare."
                 )
             except:
                 pass
 
         await update.message.reply_text(
-            "🎭 **Autoprotettori Erba**\n\n"
-            "🔒 La tua richiesta di accesso è stata inviata agli amministratori.\n"
-            "Riceverai una notifica non appena verrà approvata.",
+            "✅ **Richiesta inviata con successo!**\n\n"
+            "La tua richiesta di accesso è stata inviata agli amministratori.\n"
+            "Riceverai una notifica non appena verrà approvata.\n\n"
+            "⏳ *Tempo di approvazione stimato: pochi minuti*",
             reply_markup=crea_tastiera_fisica(user_id)
         )
         return
 
+    # Utente approvato
     if is_admin(user_id):
-        welcome_text = f"🎭 **Autoprotettori Erba**\n\n👨‍💻 Benvenuto ADMIN {user_name}!"
-    else:
-        welcome_text = f"🎭 **Autoprotettori Erba**\n\n👤 Benvenuto {user_name}!"
+        admin_welcome = f"""
+👨‍💻 **BENVENUTO ADMIN {user_name}!** 🎉
 
-    await update.message.reply_text(welcome_text, reply_markup=crea_tastiera_fisica(user_id))
+🔧 **Funzioni amministrative attive:**
+• Gestione inventario completa
+• Approvazione nuovi utenti
+• Statistiche e report
+• Sistema allarmi bombole
+
+📋 **Inventario attuale:**
+• Articoli totali: {len(get_tutti_articoli())}
+• Bombole disponibili: {conta_bombole_disponibili()}
+• Richieste in attesa: {len(get_richieste_in_attesa())}
+
+🚀 **Pronto per la gestione!**
+"""
+        await update.message.reply_text(admin_welcome, reply_markup=crea_tastiera_fisica(user_id))
+    else:
+        user_welcome = f"""
+👤 **BENVENUTO {user_name}!** 🎉
+
+📊 **Stato sistema:**
+• Articoli totali: {len(get_tutti_articoli())}
+• Bombole disponibili: {conta_bombole_disponibili()}
+
+💡 **Ricorda:**
+• Segna sempre gli articoli dopo l'uso
+• Controlla le disponibilità prima di prelevare
+• Usa i pulsanti per navigare facilmente
+
+✅ **Accesso confermato - Buon lavoro!**
+"""
+        await update.message.reply_text(user_welcome, reply_markup=crea_tastiera_fisica(user_id))
 
 # === GESTIONE RICHIESTE ACCESSO ===
 async def gestisci_richieste(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -276,7 +364,7 @@ async def gestisci_richieste(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     richieste = get_richieste_in_attesa()
     if not richieste:
-        await update.message.reply_text("✅ Nessuna richiesta di accesso in sospeso.")
+        await update.message.reply_text("✅ **Nessuna richiesta di accesso in sospeso.**")
         return
 
     keyboard = []
@@ -291,7 +379,8 @@ async def gestisci_richieste(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "👥 **RICHIESTE ACCESSO IN SOSPESO:**\n\nSeleziona un'azione:",
+        "👥 **RICHIESTE ACCESSO IN SOSPESO**\n\n"
+        "Seleziona un'azione per ogni utente:",
         reply_markup=reply_markup
     )
 
@@ -309,37 +398,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "📋 Inventario":
         articoli = get_tutti_articoli()
         if not articoli:
-            await update.message.reply_text("📦 Inventario vuoto")
+            await update.message.reply_text("📦 **Inventario vuoto**\n\nNon ci sono ancora articoli registrati.")
             return
 
         msg = "📋 **INVENTARIO COMPLETO**\n\n"
+        
         disponibili = [a for a in articoli if a[3] == 'disponibile']
         if disponibili:
-            msg += "🟢 **DISPONIBILI:**\n"
+            msg += f"🟢 **DISPONIBILI ({len(disponibili)}):**\n"
             for seriale, cat, sed, stato in disponibili:
-                msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
+                msg += f"• `{seriale}` - {CATEGORIE[cat]} - {SEDI[sed]}\n"
             msg += "\n"
         
         usati = [a for a in articoli if a[3] == 'usato']
         if usati:
-            msg += "🔴 **USATI:**\n"
+            msg += f"🔴 **USATI ({len(usati)}):**\n"
             for seriale, cat, sed, stato in usati:
-                msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
+                msg += f"• `{seriale}` - {CATEGORIE[cat]} - {SEDI[sed]}\n"
             msg += "\n"
         
         fuori_uso = [a for a in articoli if a[3] == 'fuori_uso']
         if fuori_uso:
-            msg += "⚫ **FUORI USO:**\n"
+            msg += f"⚫ **FUORI USO ({len(fuori_uso)}):**\n"
             for seriale, cat, sed, stato in fuori_uso:
-                msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
+                msg += f"• `{seriale}` - {CATEGORIE[cat]} - {SEDI[sed]}\n"
         
+        msg += f"\n📊 **Totale articoli:** {len(articoli)}"
         await update.message.reply_text(msg)
 
     # SEGNA USATO
     elif text == "🔴 Segna Usato":
         articoli = get_articoli_per_stato('disponibile')
         if not articoli:
-            await update.message.reply_text("✅ Nessun articolo da segnare come usato")
+            await update.message.reply_text("✅ **Nessun articolo da segnare come usato**\n\nTutti gli articoli sono già stati utilizzati o sono fuori uso.")
             return
 
         keyboard = []
@@ -347,28 +438,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             nome = f"{seriale} - {CATEGORIE[cat]} - {SEDI[sed]}"
             keyboard.append([InlineKeyboardButton(nome, callback_data=f"usato_{seriale}")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("🔴 Seleziona articolo da segnare come USATO:", reply_markup=reply_markup)
+        await update.message.reply_text(
+            "🔴 **SEGNA COME USATO**\n\n"
+            "Seleziona l'articolo che è stato utilizzato:",
+            reply_markup=reply_markup
+        )
 
     # DISPONIBILI
     elif text == "🟢 Disponibili":
         articoli = get_articoli_per_stato('disponibile')
         if not articoli:
-            await update.message.reply_text("🟢 Nessun articolo disponibile")
+            await update.message.reply_text("🟢 **Nessun articolo disponibile**\n\nTutti gli articoli sono attualmente in uso o fuori servizio.")
             return
-        msg = "🟢 **ARTICOLI DISPONIBILI**\n\n"
+        msg = f"🟢 **ARTICOLI DISPONIBILI ({len(articoli)})**\n\n"
         for seriale, cat, sed in articoli:
-            msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
+            msg += f"• `{seriale}` - {CATEGORIE[cat]} - {SEDI[sed]}\n"
         await update.message.reply_text(msg)
 
     # USATI
     elif text == "🔴 Usati":
         articoli = get_articoli_per_stato('usato')
         if not articoli:
-            await update.message.reply_text("🔴 Nessun articolo usato")
+            await update.message.reply_text("🔴 **Nessun articolo usato**\n\nNon ci sono articoli segnati come usati.")
             return
-        msg = "🔴 **ARTICOLI USATI**\n\n"
+        msg = f"🔴 **ARTICOLI USATI ({len(articoli)})**\n\n"
         for seriale, cat, sed in articoli:
-            msg += f"• {seriale} - {CATEGORIE[cat]} - {SEDI[sed]}\n"
+            msg += f"• `{seriale}` - {CATEGORIE[cat]} - {SEDI[sed]}\n"
         await update.message.reply_text(msg)
 
     # FUORI USO
@@ -378,7 +473,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         articoli = articoli_disponibili + articoli_usati
 
         if not articoli:
-            await update.message.reply_text("⚫ Nessun articolo da segnare come fuori uso")
+            await update.message.reply_text("⚫ **Nessun articolo da segnare come fuori uso**\n\nNon ci sono articoli disponibili per questa operazione.")
             return
 
         keyboard = []
@@ -386,7 +481,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             nome = f"{seriale} - {CATEGORIE[cat]} - {SEDI[sed]}"
             keyboard.append([InlineKeyboardButton(nome, callback_data=f"fuori_uso_{seriale}")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("⚫ Seleziona articolo da segnare come FUORI USO:", reply_markup=reply_markup)
+        await update.message.reply_text(
+            "⚫ **SEGNA COME FUORI USO**\n\n"
+            "Seleziona l'articolo da mettere fuori uso:",
+            reply_markup=reply_markup
+        )
 
     # AGGIUNGI (solo admin)
     elif text == "➕ Aggiungi" and is_admin(user_id):
@@ -396,31 +495,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for cat in CATEGORIE
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("📦 Seleziona categoria per il nuovo articolo:", reply_markup=reply_markup)
+        await update.message.reply_text(
+            "📦 **AGGIUNGI NUOVO ARTICOLO**\n\n"
+            "Seleziona la categoria:",
+            reply_markup=reply_markup
+        )
 
-    # RIMUOVI (solo admin)
+    # RIMUOVI (solo admin) - NUOVA VERSIONE CON BOTTONI
     elif text == "➖ Rimuovi" and is_admin(user_id):
-        context.user_data['azione'] = 'rimuovi'
-        await update.message.reply_text("➖ Inserisci il CODICE SERIALE dell'articolo da rimuovere:")
+        context.user_data['azione'] = 'rimuovi_categoria'
+        keyboard = [
+            [InlineKeyboardButton(CATEGORIE[cat], callback_data=f"rimuovi_cat_{cat}")] 
+            for cat in CATEGORIE
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "➖ **RIMUOVI ARTICOLO**\n\n"
+            "Seleziona categoria dell'articolo da rimuovere:",
+            reply_markup=reply_markup
+        )
 
-    # RIPRISTINA (solo admin) - ORA FUNZIONA ANCHE PER FUORI USO!
+    # RIPRISTINA (solo admin)
     elif text == "🔄 Ripristina" and is_admin(user_id):
         articoli_usati = get_articoli_per_stato('usato')
         articoli_fuori_uso = get_articoli_per_stato('fuori_uso')
         articoli = articoli_usati + articoli_fuori_uso
 
         if not articoli:
-            await update.message.reply_text("✅ Nessun articolo da ripristinare")
+            await update.message.reply_text("✅ **Nessun articolo da ripristinare**\n\nTutti gli articoli sono già disponibili.")
             return
 
         keyboard = []
         for seriale, cat, sed in articoli:
             stato_attuale = "usato" if (seriale, cat, sed) in articoli_usati else "fuori uso"
-            nome = f"{seriale} - {CATEGORIE[cat]} - {SEDI[sed]} ({stato_attuale})"
+            nome = f"{seriale} - {CATEGORIE[cat]} ({stato_attuale})"
             keyboard.append([InlineKeyboardButton(nome, callback_data=f"ripristina_{seriale}")])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("🔄 Seleziona articolo da RIPRISTINARE a disponibile:", reply_markup=reply_markup)
+        await update.message.reply_text(
+            "🔄 **RIPRISTINA ARTICOLO**\n\n"
+            "Seleziona l'articolo da ripristinare a disponibile:",
+            reply_markup=reply_markup
+        )
 
     # STATISTICHE (solo admin)
     elif text == "📊 Statistiche" and is_admin(user_id):
@@ -434,27 +550,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bombole_centrale = conta_bombole_disponibili('centrale')
 
         msg = "📊 **STATISTICHE COMPLETE**\n\n"
-        msg += f"📦 Totale articoli: {totale}\n"
-        msg += f"🟢 Disponibili: {disponibili}\n"
-        msg += f"🔴 Usati: {usati}\n"
-        msg += f"⚫ Fuori uso: {fuori_uso}\n\n"
+        msg += f"📦 **Totale articoli:** {totale}\n"
+        msg += f"🟢 **Disponibili:** {disponibili}\n"
+        msg += f"🔴 **Usati:** {usati}\n"
+        msg += f"⚫ **Fuori uso:** {fuori_uso}\n\n"
 
         msg += "⚗️ **BOMBOLE DISPONIBILI:**\n"
-        msg += f"🌿 Erba: {bombole_erba}"
+        msg += f"🌿 **Erba:** {bombole_erba}"
         if bombole_erba < SOGLIE_BOMBOLE["sotto_scorta"]:
-            msg += " 🚨 SOTTO SCORTA!"
+            msg += " 🚨 **SOTTO SCORTA!**"
         elif bombole_erba < SOGLIE_BOMBOLE["scorta_bassa"]:
-            msg += " 🟡 Scorta bassa"
+            msg += " 🟡 **Scorta bassa**"
         else:
-            msg += " ✅ Ok"
+            msg += " ✅ **Ok**"
 
-        msg += f"\n🏢 Centrale: {bombole_centrale}"
+        msg += f"\n🏢 **Centrale:** {bombole_centrale}"
         if bombole_centrale < SOGLIE_BOMBOLE["sotto_scorta"]:
-            msg += " 🚨 SOTTO SCORTA!"
+            msg += " 🚨 **SOTTO SCORTA!**"
         elif bombole_centrale < SOGLIE_BOMBOLE["scorta_bassa"]:
-            msg += " 🟡 Scorta bassa"
+            msg += " 🟡 **Scorta bassa**"
         else:
-            msg += " ✅ Ok"
+            msg += " ✅ **Ok**"
 
         await update.message.reply_text(msg)
 
@@ -466,46 +582,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "🆘 Help":
         await help_command(update, context)
 
-    # INSERIMENTO CODICE MANUALE
-    elif context.user_data.get('azione') == 'inserisci_codice':
-        codice = text.upper().strip()
+    # INSERIMENTO NUMERO (NUOVA VERSIONE)
+    elif context.user_data.get('azione') == 'inserisci_numero':
+        numero = text.strip()
         categoria = context.user_data['categoria_da_aggiungere']
         sede = context.user_data['sede_da_aggiungere']
         
-        # Genera seriale con codice manuale + sede
-        seriale = f"{codice}_{sede.upper()}"
+        # Verifica che sia un numero
+        if not numero.isdigit():
+            await update.message.reply_text("❌ **Errore:** Inserisci solo numeri! Riprova:")
+            return
+        
+        # Genera seriale automatico con prefisso + numero + sede
+        prefisso = get_prefisso_categoria(categoria)
+        seriale = f"{prefisso}_{numero}_{sede.upper()}"
         
         if insert_articolo(seriale, categoria, sede):
             await update.message.reply_text(
-                f"✅ **Articolo aggiunto!**\n\n"
-                f"**Seriale:** {seriale}\n"
+                f"✅ **ARTICOLO AGGIUNTO!**\n\n"
+                f"**Seriale:** `{seriale}`\n"
                 f"**Categoria:** {CATEGORIE[categoria]}\n"
-                f"**Sede:** {SEDI[sede]}"
+                f"**Sede:** {SEDI[sede]}\n\n"
+                f"*Il codice è stato generato automaticamente*"
             )
             
             # Controlla allarme bombole se necessario
             if categoria == 'bombola':
                 await controlla_allarme_bombole(context, sede)
         else:
-            await update.message.reply_text(f"❌ {seriale} già esistente!")
+            await update.message.reply_text(
+                f"❌ **ERRORE:** `{seriale}` già esistente!\n"
+                f"Prova con un numero diverso."
+            )
         
         # Pulisci context
         for key in ['azione', 'categoria_da_aggiungere', 'sede_da_aggiungere']:
             if key in context.user_data:
                 del context.user_data[key]
 
-    # RIMOZIONE ARTICOLO
-    elif context.user_data.get('azione') == 'rimuovi':
-        seriale = text.upper()
-        if get_articolo(seriale):
-            delete_articolo(seriale)
-            await update.message.reply_text(f"✅ {seriale} rimosso dall'inventario!")
-        else:
-            await update.message.reply_text(f"❌ {seriale} non trovato!")
-        del context.user_data['azione']
-
     else:
-        await update.message.reply_text("ℹ️ Usa i pulsanti per navigare.", reply_markup=crea_tastiera_fisica(user_id))
+        await update.message.reply_text(
+            "ℹ️ **Usa i pulsanti in basso per navigare.**\n\n"
+            "Se hai bisogno di aiuto, clicca su '🆘 Help'",
+            reply_markup=crea_tastiera_fisica(user_id)
+        )
 
 # === GESTIONE BOTTONI INLINE ===
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -518,19 +638,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("usato_"):
         seriale = data[6:]
         update_stato(seriale, "usato")
-        await query.edit_message_text(f"🔴 {seriale} segnato come USATO ✅")
+        await query.edit_message_text(f"🔴 **{seriale} segnato come USATO** ✅")
 
     # SEGNA FUORI USO
     elif data.startswith("fuori_uso_"):
         seriale = data[10:]
         update_stato(seriale, "fuori_uso")
-        await query.edit_message_text(f"⚫ {seriale} segnato come FUORI USO ✅")
+        await query.edit_message_text(f"⚫ **{seriale} segnato come FUORI USO** ✅")
 
-    # RIPRISTINA (funziona per USATI e FUORI USO!)
+    # RIPRISTINA
     elif data.startswith("ripristina_"):
         seriale = data[11:]
         update_stato(seriale, "disponibile")
-        await query.edit_message_text(f"🔄 {seriale} ripristinato a DISPONIBILE ✅")
+        await query.edit_message_text(f"🔄 **{seriale} ripristinato a DISPONIBILE** ✅")
 
     # APPROVA UTENTE
     elif data.startswith("approva_"):
@@ -543,12 +663,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 user_id_approvare,
-                "✅ **Accesso Approvato!**\n\nOra puoi utilizzare tutte le funzioni del bot.\nUsa /start per iniziare."
+                "✅ **ACCESSO APPROVATO!** 🎉\n\n"
+                "Ora puoi utilizzare tutte le funzioni del bot.\n"
+                "Usa /start per iniziare con le funzioni complete.\n\n"
+                "📱 *Buon lavoro!*"
             )
         except:
             pass
             
-        await query.edit_message_text(f"✅ Utente {user_id_approvare} approvato!")
+        await query.edit_message_text(f"✅ **Utente {user_id_approvare} approvato!**")
 
     # RIFIUTA UTENTE
     elif data.startswith("rifiuta_"):
@@ -561,9 +684,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c.execute("DELETE FROM utenti WHERE user_id = ?", (user_id_rifiutare,))
         conn.commit()
         conn.close()
-        await query.edit_message_text(f"❌ Utente {user_id_rifiutare} rifiutato!")
+        await query.edit_message_text(f"❌ **Utente {user_id_rifiutare} rifiutato!**")
 
-    # SELEZIONE CATEGORIA
+    # SELEZIONE CATEGORIA PER AGGIUNTA
     elif data.startswith("nuovo_cat_"):
         categoria = data[10:]
         context.user_data['nuova_categoria'] = categoria
@@ -574,22 +697,70 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for sede in SEDI
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(f"🏢 Seleziona sede per {CATEGORIE[categoria]}:", reply_markup=reply_markup)
+        await query.edit_message_text(
+            f"🏢 **SELEZIONA SEDE**\n\n"
+            f"Articolo: {CATEGORIE[categoria]}\n"
+            f"Scegli la sede:",
+            reply_markup=reply_markup
+        )
 
-    # SELEZIONE SEDE
+    # SELEZIONE SEDE PER AGGIUNTA
     elif data.startswith("nuovo_sede_"):
         sede = data[11:]
         categoria = context.user_data['nuova_categoria']
         
-        # Chiedi all'admin di inserire il codice manualmente
-        context.user_data['azione'] = 'inserisci_codice'
+        # Chiedi all'admin di inserire solo il NUMERO
+        context.user_data['azione'] = 'inserisci_numero'
         context.user_data['categoria_da_aggiungere'] = categoria
         context.user_data['sede_da_aggiungere'] = sede
         
+        prefisso = get_prefisso_categoria(categoria)
         await query.edit_message_text(
-            f"📝 Inserisci il CODICE dell'articolo per {CATEGORIE[categoria]} - {SEDI[sede]}:\n\n"
-            f"(Esempio: MAS001, BOM123, ecc.)"
+            f"📝 **INSERISCI NUMERO**\n\n"
+            f"**Articolo:** {CATEGORIE[categoria]}\n"
+            f"**Sede:** {SEDI[sede]}\n"
+            f"**Prefisso automatico:** `{prefisso}`\n\n"
+            f"**Inserisci solo i numeri:**\n"
+            f"Esempio: 001, 123, 456\n\n"
+            f"Il codice completo sarà: `{prefisso}_NUMERO_{sede.upper()}`"
         )
+
+    # RIMOZIONE ARTICOLO - SELEZIONE CATEGORIA
+    elif data.startswith("rimuovi_cat_"):
+        categoria = data[12:]
+        articoli = get_articoli_per_stato('disponibile') + get_articoli_per_stato('usato') + get_articoli_per_stato('fuori_uso')
+        articoli_categoria = [a for a in articoli if a[1] == categoria]
+        
+        if not articoli_categoria:
+            await query.edit_message_text(f"❌ **Nessun articolo trovato per {CATEGORIE[categoria]}**")
+            return
+        
+        keyboard = []
+        for seriale, cat, sede in articoli_categoria:
+            articolo_info = get_articolo(seriale)
+            stato = articolo_info[4] if articolo_info else "sconosciuto"
+            emoji_stato = "🟢" if stato == "disponibile" else "🔴" if stato == "usato" else "⚫"
+            nome = f"{emoji_stato} {seriale} - {SEDI[sede]}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"elimina_{seriale}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"➖ **ELIMINA ARTICOLO**\n\n"
+            f"Categoria: {CATEGORIE[categoria]}\n"
+            f"Seleziona l'articolo da rimuovere:",
+            reply_markup=reply_markup
+        )
+
+    # RIMOZIONE ARTICOLO - CONFERMA ELIMINAZIONE
+    elif data.startswith("elimina_"):
+        seriale = data[8:]
+        articolo = get_articolo(seriale)
+        
+        if articolo:
+            delete_articolo(seriale)
+            await query.edit_message_text(f"✅ **{seriale} rimosso dall'inventario!**")
+        else:
+            await query.edit_message_text(f"❌ **{seriale} non trovato!**")
 
 # === ALLARME BOMBOLE ===
 async def controlla_allarme_bombole(context: ContextTypes.DEFAULT_TYPE, sede=None):
@@ -607,12 +778,14 @@ async def controlla_allarme_bombole(context: ContextTypes.DEFAULT_TYPE, sede=Non
     conn.close()
 
     messaggio = None
+    sede_testo = f" {SEDI[sede]}" if sede else ""
+    
     if count <= SOGLIE_BOMBOLE["sotto_scorta"]:
-        messaggio = f"🚨 **SOTTO SCORTA BOMBOLE!**\nSolo {count} bombole disponibili!"
+        messaggio = f"🚨 **SOTTO SCORTA BOMBOLE{sede_testo}!**\nSolo {count} bombole disponibili!"
     elif count == SOGLIE_BOMBOLE["allarme_scorta"]:
-        messaggio = f"🟡 **ALLARME SCORTA BOMBOLE**\nSolo {count} bombole disponibili!"
+        messaggio = f"🟡 **ALLARME SCORTA BOMBOLE{sede_testo}**\nSolo {count} bombole disponibili!"
     elif count == SOGLIE_BOMBOLE["preallarme"]:
-        messaggio = f"🔶 **PREALLARME SCORTA BOMBOLE**\nSolo {count} bombole disponibili!"
+        messaggio = f"🔶 **PREALLARME SCORTA BOMBOLE{sede_testo}**\nSolo {count} bombole disponibili!"
 
     if messaggio:
         for admin_id in ADMIN_IDS:
@@ -626,11 +799,17 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 Bot Telegram is running!"
+    return "🤖 Bot Telegram Autoprotettori Erba - ONLINE 🟢"
 
 @app.route('/health')
 def health():
     return "OK"
+
+@app.route('/status')
+def status():
+    articoli = len(get_tutti_articoli())
+    bombole = conta_bombole_disponibili()
+    return f"Bot Active | Articoli: {articoli} | Bombole: {bombole}"
 
 def run_flask():
     app.run(host='0.0.0.0', port=10000, debug=False)
@@ -649,7 +828,11 @@ def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("🤖 Bot Avviato! Premi Ctrl+C per fermare.")
+    print("🤖 Bot Autoprotettori Erba Avviato!")
+    print("📍 Server: Render.com")
+    print("🟢 Status: ONLINE")
+    print("💾 Database: SQLite3")
+    print("👥 Admin configurati:", len(ADMIN_IDS))
     application.run_polling()
 
 if __name__ == '__main__':
