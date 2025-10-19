@@ -6,7 +6,7 @@ from datetime import datetime
 import asyncio
 
 # === CONFIGURAZIONE ===
-BOT_TOKEN = "INSERISCI_TOKEN"
+BOT_TOKEN = "8422498466:AAGQI12JOtirJUdZr-kdu04Yj1XOPkIGCVY"
 ADMIN_IDS = [1816045269, 653425963, 693843502, 6622015744]
 
 # SOGLIE CORRETTE PER BOMBOLE
@@ -384,4 +384,5 @@ def main():
     application.run_polling()
 
 if __name__ == '__main__':
+
     main()
