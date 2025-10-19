@@ -2,13 +2,14 @@ import logging
 import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 import os
 from flask import Flask
 import threading
 import requests
 import time
+import psutil
 
 # === CONFIGURAZIONE ===
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
@@ -103,6 +104,94 @@ def approva_utente(user_id):
                  WHERE user_id = ?''', (user_id,))
     conn.commit()
     conn.close()
+
+# === FUNZIONI SERVER STATUS (NUOVE) ===
+def get_render_usage_simple():
+    """
+    Versione semplificata che stima l'uso basandosi sul tempo di attività
+    e mostra informazioni sul consumo mensile
+    """
+    try:
+        # Calcola giorni nel mese corrente
+        today = datetime.now()
+        first_day_next_month = datetime(today.year, today.month % 12 + 1, 1)
+        last_day_current_month = first_day_next_month - timedelta(days=1)
+        days_in_month = last_day_current_month.day
+        days_passed = today.day
+        days_remaining = days_in_month - days_passed
+        
+        # Stima ore usate basandosi sui giorni passati
+        # Assumendo che il bot sia sempre attivo (24/7)
+        hours_in_day = 24
+        estimated_hours_used = days_passed * hours_in_day
+        monthly_limit = 750  # Ore incluse nel piano di Render
+        
+        # Calcola proiezione mensile
+        projected_monthly_usage = (estimated_hours_used / days_passed) * days_in_month
+        hours_remaining = monthly_limit - projected_monthly_usage
+        
+        # Calcola percentuali
+        usage_percentage = (estimated_hours_used / monthly_limit) * 100
+        projected_percentage = (projected_monthly_usage / monthly_limit) * 100
+        
+        status_msg = "🖥️ **STATUS SERVER RENDER**\n\n"
+        status_msg += f"📅 **MESE CORRENTE:** {today.strftime('%B %Y')}\n"
+        status_msg += f"• Giorni passati: {days_passed}/{days_in_month}\n"
+        status_msg += f"• Giorni rimanenti: {days_remaining}\n\n"
+        
+        status_msg += "⏰ **CONSUMO ORE (STIMA):**\n"
+        status_msg += f"• Ore stimate usate: {estimated_hours_used:.1f}h\n"
+        status_msg += f"• Proiezione mensile: {projected_monthly_usage:.1f}h/750h\n"
+        status_msg += f"• Ore stimate rimanenti: {hours_remaining:.1f}h\n\n"
+        
+        status_msg += "📊 **PERCENTUALI:**\n"
+        status_msg += f"• Consumo attuale: {usage_percentage:.1f}%\n"
+        status_msg += f"• Proiezione finale: {projected_percentage:.1f}%\n\n"
+        
+        # Aggiungi avvisi se il consumo è alto
+        if projected_percentage > 80:
+            status_msg += "🚨 **ATTENZIONE:** Consumo elevato previsto!\n"
+        elif projected_percentage > 60:
+            status_msg += "⚠️ **NOTA:** Consumo nella norma\n"
+        else:
+            status_msg += "✅ **OK:** Consumo sotto controllo\n"
+            
+        status_msg += f"\n🕒 Aggiornato: {today.strftime('%d/%m/%Y %H:%M')}"
+        
+        return status_msg
+        
+    except Exception as e:
+        return f"❌ Errore nel calcolo: {str(e)}"
+
+def get_system_metrics():
+    """Ottiene metriche di sistema base"""
+    try:
+        # Metriche di memoria
+        process = psutil.Process(os.getpid())
+        process_memory = process.memory_info().rss / 1024 / 1024  # MB
+        
+        system_memory = psutil.virtual_memory()
+        total_memory_used = system_memory.used / 1024 / 1024  # MB
+        total_memory_total = system_memory.total / 1024 / 1024  # MB
+        memory_percent = system_memory.percent
+        
+        # Metriche di CPU
+        cpu_percent = psutil.cpu_percent(interval=1)
+        
+        # Uptime del sistema
+        boot_time = datetime.fromtimestamp(psutil.boot_time())
+        uptime = datetime.now() - boot_time
+        
+        metrics_msg = "📊 **METRICHE DI SISTEMA:**\n"
+        metrics_msg += f"• RAM Bot: {process_memory:.1f}MB\n"
+        metrics_msg += f"• RAM Sistema: {total_memory_used:.1f}MB / {total_memory_total:.1f}MB ({memory_percent:.1f}%)\n"
+        metrics_msg += f"• CPU: {cpu_percent:.1f}%\n"
+        metrics_msg += f"• Uptime: {str(uptime).split('.')[0]}\n"
+        
+        return metrics_msg
+        
+    except Exception as e:
+        return f"📊 Errore metriche: {str(e)}"
 
 # === FUNZIONI ARTICOLI ===
 def get_prefisso_categoria(categoria):
@@ -294,6 +383,10 @@ def crea_tastiera_fisica(user_id):
         tastiera.append([KeyboardButton("➕ Aggiungi"), KeyboardButton("➖ Rimuovi")])
         tastiera.append([KeyboardButton("🔄 Ripristina"), KeyboardButton("📊 Statistiche")])
         tastiera.append([KeyboardButton("👥 Gestisci Richieste")])
+        
+        # AGGIUNGI QUESTO: pulsante status server solo per l'admin specifico
+        if user_id == 1816045269:
+            tastiera.append([KeyboardButton("🖥️ Status Server")])
 
     return ReplyKeyboardMarkup(tastiera, resize_keyboard=True, is_persistent=True)
 
@@ -610,6 +703,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # HELP
     elif text == "🆘 Help":
         await help_command(update, context)
+
+    # STATUS SERVER (SOLO PER ADMIN SPECIFICO)
+    elif text == "🖥️ Status Server" and user_id == 1816045269:
+        # Mostra lo stato del server e il consumo stimato
+        usage_info = get_render_usage_simple()
+        system_info = get_system_metrics()
+        
+        status_msg = f"{usage_info}\n\n{system_info}"
+        await update.message.reply_text(status_msg)
 
     # INSERIMENTO NUMERO
     elif context.user_data.get('azione') == 'inserisci_numero':
