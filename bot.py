@@ -5,6 +5,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from datetime import datetime
 import asyncio
 import os
+from flask import Flask
+import threading
 
 # === CONFIGURAZIONE ===
 BOT_TOKEN = os.environ.get('BOT_TOKEN')  # ← PRENDE IL TOKEN DA RAILWAY
@@ -414,10 +416,29 @@ async def controlla_allarme_bombole(context: ContextTypes.DEFAULT_TYPE, sede=Non
                 await context.bot.send_message(admin_id, messaggio)
             except:
                 pass
+# === SERVER FLASK PER RENDER ===
+app = Flask(__name__)
 
+@app.route('/')
+def home():
+    return "🤖 Bot Telegram is running!"
+
+@app.route('/health')
+def health():
+    return "OK"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=10000, debug=False)
 def main():
+    # Avvia Flask in un thread separato
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    print("🚀 Flask server started on port 10000")
+    
+    # Il resto del tuo codice esistente
     application = Application.builder().token(BOT_TOKEN).build()
-
+    
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(button_handler))
@@ -428,6 +449,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
