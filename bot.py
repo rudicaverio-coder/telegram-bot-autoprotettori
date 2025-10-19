@@ -141,7 +141,49 @@ def get_prossimo_id_item(categoria, sede):
     return max(numeri_esistenti) + 1 if numeri_esistenti else 1
 
 # ... (altre funzioni database simili alle tue ma migliorate)
+# === FUNZIONE HELP_COMMAND MANCANTE ===
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not is_user_approved(user_id):
+        await update.message.reply_text("Per utilizzare il bot, devi prima richiedere l'accesso.", reply_markup=crea_tastiera_fisica(user_id))
+        return
 
+    if is_admin(user_id):
+        help_text = """
+🎭 **GUIDA ADMIN** 👨‍💻
+
+**FUNZIONI:**
+• 📋 Inventario - Vista completa
+• 🔴 Segna Usato - Marca articoli usati
+• 🟢 Disponibili - Solo articoli disponibili
+• 🔴 Usati - Solo articoli usati
+• ⚫ Fuori Uso - Solo articoli fuori uso
+• ➕ Aggiungi - Inserisci nuovo articolo
+• ➖ Rimuovi - Elimina articolo
+• 🔄 Ripristina - Ripristina articoli usati/fuori uso
+• 📊 Statistiche - Statistiche complete
+• 👥 Gestisci Richieste - Approva nuovi utenti
+
+**SISTEMA BOMBOLE:**
+• 🌿 Bombola Erba
+• 🏢 Bombola Centrale
+• Allarme automatico scorte basse
+"""
+    else:
+        help_text = """
+🎭 **GUIDA UTENTE** 👤
+
+**FUNZIONI:**
+• 📋 Inventario - Vista completa
+• 🔴 Segna Usato - Marca articoli usati
+• 🟢 Disponibili - Solo articoli disponibili
+• 🔴 Usati - Solo articoli usati
+• ⚫ Fuori Uso - Solo articoli fuori uso
+
+**REGOLA:**
+Segna sempre gli articoli dopo l'uso!
+"""
+    await update.message.reply_text(help_text, reply_markup=crea_tastiera_fisica(user_id))
 # === TASTIERA FISICA ===
 def crea_tastiera_fisica(user_id):
     if not is_user_approved(user_id):
@@ -386,4 +428,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
