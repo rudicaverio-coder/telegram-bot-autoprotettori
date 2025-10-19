@@ -4,9 +4,10 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from datetime import datetime
 import asyncio
+import os
 
 # === CONFIGURAZIONE ===
-BOT_TOKEN = "INSERISCI_TOKEN"
+BOT_TOKEN = os.environ.get('BOT_TOKEN')  # ← PRENDE IL TOKEN DA RAILWAY
 ADMIN_IDS = [1816045269, 653425963, 693843502, 6622015744]
 
 # SOGLIE CORRETTE PER BOMBOLE
@@ -385,3 +386,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
