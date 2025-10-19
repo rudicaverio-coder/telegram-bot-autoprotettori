@@ -101,10 +101,10 @@ def approva_utente(user_id):
     conn.close()
 
 # === FUNZIONI ARTICOLI MIGLIORATE ===
-def genera_seriale(categoria, sede, id_item):
-    """Genera seriale nel formato: Categoria_IDItem_Sede"""
-    prefisso = categoria[:3].upper()  # MAS, ERO, SPA, BOM
-    return f"{prefisso}_{id_item}_{sede.upper()}"
+def genera_seriale_manuale(seriale_inserito, sede):
+    """Formatta il seriale inserito manualmente dall'admin"""
+    # Mantiene il seriale inserito dall'admin + aggiunge sede
+    return f"{seriale_inserito.upper()}_{sede.upper()}"
 
 def insert_articolo(seriale, categoria, sede, stato="disponibile"):
     conn = sqlite3.connect('autoprotettori_v3.db')
@@ -358,12 +358,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"🏢 Seleziona sede per {CATEGORIE[categoria]}:", reply_markup=reply_markup)
 
     elif data.startswith("nuovo_sede_"):
-        sede = data[11:]
-        categoria = context.user_data['nuova_categoria']
-        
-        # Genera seriale automatico
-        prossimo_id = get_prossimo_id_item(categoria, sede)
-        seriale = genera_seriale(categoria, sede, prossimo_id)
+    sede = data[11:]
+    categoria = context.user_data['nuova_categoria']
+    
+    # Chiedi all'admin di inserire il codice manualmente
+    context.user_data['azione'] = 'inserisci_codice'
+    context.user_data['categoria_da_aggiungere'] = categoria
+    context.user_data['sede_da_aggiungere'] = sede
+    
+    await query.edit_message_text(
+        f"📝 Inserisci il CODICE dell'articolo per {CATEGORIE[categoria]} - {SEDI[sede]}:\n\n"
+        f"(Esempio: MAS001, BOM123, ecc.)"
+    )
         
         if insert_articolo(seriale, categoria, sede):
             # Controlla allarme bombole se necessario
@@ -449,3 +455,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
