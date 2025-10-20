@@ -10,10 +10,16 @@ import threading
 import requests
 import time
 import psutil
+import base64
+import json
 
 # === CONFIGURAZIONE ===
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_IDS = [1816045269, 653425963, 693843502, 6622015744]
+
+# Configurazione backup GitHub
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')  # Token GitHub personale
+GIST_ID = os.environ.get('GIST_ID')  # ID del Gist (opzionale - verrà creato automaticamente)
 
 # SOGLIE BOMBOLE (ORA SONO COMBINATE ERBA + CENTRALE)
 SOGLIE_BOMBOLE = {
@@ -105,7 +111,166 @@ def approva_utente(user_id):
     conn.commit()
     conn.close()
 
-# === FUNZIONI SERVER STATUS (NUOVE) ===
+# === SISTEMA BACKUP AUTOMATICO SU GITHUB ===
+def backup_database_to_gist():
+    """Salva il database su GitHub Gist"""
+    if not GITHUB_TOKEN:
+        print("❌ Token GitHub non configurato - backup disabilitato")
+        return False
+    
+    try:
+        # Leggi il database
+        with open('autoprotettori_v3.db', 'rb') as f:
+            db_content = f.read()
+        
+        # Converti in base64 per Gist
+        db_base64 = base64.b64encode(db_content).decode('utf-8')
+        
+        # Prepara i dati per Gist
+        files = {
+            'autoprotettori_backup.json': {
+                'content': json.dumps({
+                    'timestamp': datetime.now().isoformat(),
+                    'database_size': len(db_content),
+                    'database_base64': db_base64,
+                    'backup_type': 'automatic'
+                })
+            }
+        }
+        
+        headers = {
+            'Authorization': f'token {GITHUB_TOKEN}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        # Se abbiamo un GIST_ID, aggiornalo, altrimenti creane uno nuovo
+        if GIST_ID:
+            url = f'https://api.github.com/gists/{GIST_ID}'
+            data = {'files': files}
+            response = requests.patch(url, headers=headers, json=data)
+        else:
+            url = 'https://api.github.com/gists'
+            data = {
+                'description': f'Backup Autoprotettori Bot - {datetime.now().strftime("%Y-%m-%d %H:%M")}',
+                'public': False,
+                'files': files
+            }
+            response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code in [200, 201]:
+            result = response.json()
+            print(f"✅ Backup su Gist completato: {result['html_url']}")
+            
+            # Salva il GIST_ID per futuri aggiornamenti
+            if not GIST_ID:
+                with open('gist_id.txt', 'w') as f:
+                    f.write(result['id'])
+                print(f"📝 Nuovo Gist ID salvato: {result['id']}")
+            
+            return True
+        else:
+            print(f"❌ Errore backup Gist: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Errore durante backup: {str(e)}")
+        return False
+
+def restore_database_from_gist():
+    """Ripristina il database da GitHub Gist"""
+    if not GITHUB_TOKEN or not GIST_ID:
+        print("❌ Token o Gist ID non configurati - restore disabilitato")
+        return False
+    
+    try:
+        headers = {
+            'Authorization': f'token {GITHUB_TOKEN}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        url = f'https://api.github.com/gists/{GIST_ID}'
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            gist_data = response.json()
+            backup_file = gist_data['files'].get('autoprotettori_backup.json')
+            
+            if backup_file:
+                backup_content = json.loads(backup_file['content'])
+                db_base64 = backup_content['database_base64']
+                timestamp = backup_content['timestamp']
+                
+                # Decodifica e salva il database
+                db_content = base64.b64decode(db_base64)
+                with open('autoprotettori_v3.db', 'wb') as f:
+                    f.write(db_content)
+                
+                print(f"✅ Database ripristinato da backup: {timestamp}")
+                return True
+            else:
+                print("❌ File di backup non trovato nel Gist")
+                return False
+        else:
+            print(f"❌ Errore recupero Gist: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Errore durante restore: {str(e)}")
+        return False
+
+# === BACKUP AUTOMATICO OGNI 30 MINUTI ===
+def backup_scheduler():
+    """Scheduler per backup automatici"""
+    print("🔄 Scheduler backup avviato (ogni 30 minuti)")
+    
+    # Primo backup immediato all'avvio
+    time.sleep(10)
+    print("🔄 Backup iniziale in corso...")
+    backup_database_to_gist()
+    
+    while True:
+        time.sleep(1800)  # 30 minuti
+        print("🔄 Backup automatico in corso...")
+        backup_database_to_gist()
+
+# === SISTEMA KEEP-ALIVE ULTRA-AGGRESSIVO ===
+def keep_alive_aggressive():
+    """Keep-alive ultra-aggressivo per evitare spin-down"""
+    urls = [
+        "https://telegram-bot-autoprotettori.onrender.com/health",
+        "https://telegram-bot-autoprotettori.onrender.com/", 
+        "https://telegram-bot-autoprotettori.onrender.com/ping",
+        "https://telegram-bot-autoprotettori.onrender.com/status",
+        "https://telegram-bot-autoprotettori.onrender.com/keep-alive"
+    ]
+    
+    print("🔄 Sistema keep-alive ULTRA-AGGRESSIVO avviato! Ping ogni 5 minuti...")
+    
+    while True:
+        success_count = 0
+        for url in urls:
+            try:
+                response = requests.get(url, timeout=15)
+                if response.status_code == 200:
+                    print(f"✅ Ping riuscito - {datetime.now().strftime('%H:%M:%S')} - {url}")
+                    success_count += 1
+                else:
+                    print(f"⚠️  Ping {url} - Status: {response.status_code}")
+            except Exception as e:
+                print(f"❌ Errore ping {url}: {e}")
+        
+        print(f"📊 Ping completati: {success_count}/{len(urls)} successi")
+        
+        if success_count == 0:
+            print("🚨 CRITICO: Tutti i ping falliti! Riavvio in 30 secondi...")
+            time.sleep(30)
+            # Forza il riavvio
+            os._exit(1)
+        
+        # Aspetta solo 5 minuti (300 secondi) - molto meno di 15 minuti!
+        time.sleep(300)
+
+# === FUNZIONI SERVER STATUS ===
 def get_render_usage_simple():
     """
     Versione semplificata che stima l'uso basandosi sul tempo di attività
@@ -306,37 +471,6 @@ def organizza_articoli_per_categoria(articoli):
     
     return articoli_organizzati
 
-# === SISTEMA KEEP-ALIVE ===
-def keep_alive():
-    """Invia ping ogni 10 minuti per evitare spin down"""
-    urls = [
-        "https://telegram-bot-autoprotettori.onrender.com/health",
-        "https://telegram-bot-autoprotettori.onrender.com/",
-        "https://telegram-bot-autoprotettori.onrender.com/ping"
-    ]
-    
-    print("🔄 Sistema keep-alive avviato! Ping ogni 8 minuti...")
-    
-    while True:
-        success = False
-        for url in urls:
-            try:
-                response = requests.get(url, timeout=10)
-                if response.status_code == 200:
-                    print(f"✅ Ping riuscito - {datetime.now().strftime('%H:%M:%S')} - {url}")
-                    success = True
-                    break  # Se uno funziona, passa al ciclo successivo
-                else:
-                    print(f"⚠️  Ping {url} - Status: {response.status_code}")
-            except Exception as e:
-                print(f"❌ Errore ping {url}: {e}")
-        
-        if not success:
-            print("🚨 Tutti i ping falliti!")
-        
-        # Aspetta 8 minuti (480 secondi) - meno di 15 minuti!
-        time.sleep(480)
-
 # === FUNZIONE HELP ===
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -361,7 +495,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 👥 Gestire richieste accesso nuovi utenti
 
 🔄 **SISTEMA SEMPRE ATTIVO:**
-• ✅ Ping automatici ogni 8 minuti
+• ✅ Ping automatici ogni 5 minuti
+• ✅ Backup automatico ogni 30 minuti
 • ✅ Zero tempi di attesa
 • ✅ Servizio 24/7 garantito
 """
@@ -957,21 +1092,49 @@ def status():
     bombole = conta_bombole_disponibili()
     return f"Bot Active | Articoli: {articoli} | Bombole: {bombole} | Keep-alive: ✅"
 
+@app.route('/keep-alive')
+def keep_alive_endpoint():
+    return f"KEEP-ALIVE ACTIVE - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+@app.route('/backup-now')
+def backup_now():
+    """Endpoint per forzare un backup immediato"""
+    if backup_database_to_gist():
+        return "✅ Backup eseguito con successo!"
+    else:
+        return "❌ Errore durante il backup"
+
 def run_flask():
     app.run(host='0.0.0.0', port=10000, debug=False)
 
 # === MAIN ===
 def main():
+    print("🚀 Avvio Bot Autoprotettori Erba...")
+    
+    # Ripristina il database all'avvio se esiste un backup
+    if GITHUB_TOKEN and GIST_ID:
+        print("🔄 Tentativo di ripristino database da backup...")
+        if restore_database_from_gist():
+            print("✅ Database ripristinato con successo!")
+        else:
+            print("ℹ️  Nessun backup trovato o errore, si parte con database nuovo")
+    else:
+        print("ℹ️  Backup GitHub non configurato, si parte con database nuovo")
+    
     # Avvia Flask in un thread separato
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
+    print("✅ Flask server started on port 10000")
     
-    print("🚀 Flask server started on port 10000")
-    
-    # 🔥 AVVIA IL SISTEMA KEEP-ALIVE
-    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
+    # 🔥 AVVIA IL SISTEMA KEEP-ALIVE ULTRA-AGGRESSIVO
+    keep_alive_thread = threading.Thread(target=keep_alive_aggressive, daemon=True)
     keep_alive_thread.start()
-    print("🔄 Sistema keep-alive attivato! Ping ogni 8 minuti")
+    print("✅ Sistema keep-alive ULTRA-AGGRESSIVO attivato! Ping ogni 5 minuti")
+    
+    # 🔄 AVVIA SCHEDULER BACKUP AUTOMATICO
+    backup_thread = threading.Thread(target=backup_scheduler, daemon=True)
+    backup_thread.start()
+    print("✅ Scheduler backup attivato! Backup ogni 30 minuti")
     
     application = Application.builder().token(BOT_TOKEN).build()
     
@@ -982,11 +1145,15 @@ def main():
 
     print("🤖 Bot Autoprotettori Erba Avviato!")
     print("📍 Server: Render.com")
-    print("🟢 Status: ONLINE con keep-alive")
-    print("💾 Database: SQLite3")
+    print("🟢 Status: ONLINE con keep-alive ultra-aggressivo")
+    print("💾 Database: SQLite3 con backup automatico")
     print("👥 Admin configurati:", len(ADMIN_IDS))
-    print("⏰ Ping automatici ogni 8 minuti - Zero spin down! 🚀")
+    print("⏰ Ping automatici ogni 5 minuti - Zero spin down! 🚀")
+    print("💾 Backup automatici ogni 30 minuti - Dati al sicuro! 🛡️")
+    
     application.run_polling()
 
 if __name__ == '__main__':
     main()
+
+#GitHub per Gist:  g h p _ q n F F B t U P Y q 0 8 a c r 3 S j j W H w n 5 J i g P C A 2 5 1 i F c
