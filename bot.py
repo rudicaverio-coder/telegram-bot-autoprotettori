@@ -74,6 +74,12 @@ SEDI = {
     "centrale": "🏢 Centrale"
 }
 
+# Nuovo stato per gli articoli in centrale
+STATI_CENTRALE = {
+    "usato_centrale": "🔴 Usato (Centrale)",
+    "fuori_uso_centrale": "⚫ Fuori Uso (Centrale)"
+}
+
 # ORDINE DELLE CATEGORIE PER L'INVENTARIO
 ORDINE_CATEGORIE = ["bombola", "maschera", "erogatore", "spallaccio"]
 
@@ -110,6 +116,83 @@ def approva_utente(user_id):
                  WHERE user_id = ?''', (user_id,))
     conn.commit()
     conn.close()
+
+# === FUNZIONI GESTIONE CENTRALE ===
+def sposta_in_centrale(seriale):
+    """Sposta un articolo in centrale mantenendo lo stato originale"""
+    conn = sqlite3.connect('autoprotettori_v3.db')
+    c = conn.cursor()
+    
+    # Prima ottieni lo stato attuale
+    c.execute("SELECT stato FROM articoli WHERE seriale = ?", (seriale,))
+    risultato = c.fetchone()
+    
+    if risultato:
+        stato_attuale = risultato[0]
+        nuovo_stato = ""
+        
+        if stato_attuale == "usato":
+            nuovo_stato = "usato_centrale"
+        elif stato_attuale == "fuori_uso":
+            nuovo_stato = "fuori_uso_centrale"
+        else:
+            conn.close()
+            return False  # Non si può spostare in centrale se non è usato o fuori uso
+        
+        c.execute("UPDATE articoli SET stato = ? WHERE seriale = ?", (nuovo_stato, seriale))
+        conn.commit()
+        conn.close()
+        return True
+    
+    conn.close()
+    return False
+
+def ripristina_da_centrale(seriale):
+    """Ripristina un articolo da centrale a Erba"""
+    conn = sqlite3.connect('autoprotettori_v3.db')
+    c = conn.cursor()
+    
+    # Prima ottieni lo stato attuale
+    c.execute("SELECT stato FROM articoli WHERE seriale = ?", (seriale,))
+    risultato = c.fetchone()
+    
+    if risultato:
+        stato_attuale = risultato[0]
+        nuovo_stato = ""
+        
+        if stato_attuale == "usato_centrale":
+            nuovo_stato = "usato"
+        elif stato_attuale == "fuori_uso_centrale":
+            nuovo_stato = "fuori_uso"
+        else:
+            conn.close()
+            return False  # Non è in centrale
+        
+        c.execute("UPDATE articoli SET stato = ? WHERE seriale = ?", (nuovo_stato, seriale))
+        conn.commit()
+        conn.close()
+        return True
+    
+    conn.close()
+    return False
+
+def get_articoli_in_centrale():
+    """Restituisce tutti gli articoli attualmente in centrale"""
+    conn = sqlite3.connect('autoprotettori_v3.db')
+    c = conn.cursor()
+    c.execute("SELECT seriale, categoria, sede, stato FROM articoli WHERE stato IN ('usato_centrale', 'fuori_uso_centrale')")
+    result = c.fetchall()
+    conn.close()
+    return result
+
+def get_articoli_per_stato_centrale(stato):
+    """Restituisce articoli per stato in centrale"""
+    conn = sqlite3.connect('autoprotettori_v3.db')
+    c = conn.cursor()
+    c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato = ?", (stato,))
+    result = c.fetchall()
+    conn.close()
+    return result
 
 # === SISTEMA BACKUP AUTOMATICO SU GITHUB ===
 def backup_database_to_gist():
@@ -407,7 +490,19 @@ def delete_articolo(seriale):
 def get_articoli_per_stato(stato):
     conn = sqlite3.connect('autoprotettori_v3.db')
     c = conn.cursor()
-    c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato = ?", (stato,))
+    
+    # Gestisce sia stati base che stati combinati
+    if stato == 'usato':
+        # Include sia usato che usato_centrale
+        c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato IN ('usato', 'usato_centrale')")
+    elif stato == 'fuori_uso':
+        # Include sia fuori_uso che fuori_uso_centrale
+        c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato IN ('fuori_uso', 'fuori_uso_centrale')")
+    elif stato == 'disponibile':
+        c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato = ?", (stato,))
+    else:
+        c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato = ?", (stato,))
+        
     result = c.fetchall()
     conn.close()
     return result
@@ -485,6 +580,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 🔴 Segnare articoli usati dopo l'utilizzo
 • 🟢 Controllare disponibilità in tempo reale
 • 📊 Monitorare stati (disponibili/usati/fuori uso)
+• 📍 Gestire articoli in centrale
 
 👨‍💻 **COME ADMIN:**
 • ➕ Aggiungere nuovi articoli all'inventario
@@ -511,7 +607,8 @@ def crea_tastiera_fisica(user_id):
     tastiera = [
         [KeyboardButton("📋 Inventario"), KeyboardButton("🔴 Segna Usato")],
         [KeyboardButton("🟢 Disponibili"), KeyboardButton("🔴 Usati")],
-        [KeyboardButton("⚫ Fuori Uso"), KeyboardButton("🆘 Help")]
+        [KeyboardButton("⚫ Fuori Uso"), KeyboardButton("📍 In Centrale")],
+        [KeyboardButton("🆘 Help")]
     ]
 
     if is_admin(user_id):
@@ -621,8 +718,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # ORGANIZZA PER STATO E CATEGORIA
         disponibili = [a for a in articoli if a[3] == 'disponibile']
-        usati = [a for a in articoli if a[3] == 'usato']
-        fuori_uso = [a for a in articoli if a[3] == 'fuori_uso']
+        usati = [a for a in articoli if a[3] in ['usato', 'usato_centrale']]
+        fuori_uso = [a for a in articoli if a[3] in ['fuori_uso', 'fuori_uso_centrale']]
         
         # DISPONIBILI
         if disponibili:
@@ -646,8 +743,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 articoli_cat = usati_organizzati[categoria]
                 if articoli_cat:
                     msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
-                    for seriale, sede, _ in articoli_cat:
-                        msg += f"• {seriale} - {SEDI[sede]}\n"
+                    for seriale, sede, stato in articoli_cat:
+                        locazione = " (Centrale)" if stato == 'usato_centrale' else ""
+                        msg += f"• {seriale} - {SEDI[sede]}{locazione}\n"
             msg += "\n"
         
         # FUORI USO
@@ -659,8 +757,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 articoli_cat = fuori_uso_organizzati[categoria]
                 if articoli_cat:
                     msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
-                    for seriale, sede, _ in articoli_cat:
-                        msg += f"• {seriale} - {SEDI[sede]}\n"
+                    for seriale, sede, stato in articoli_cat:
+                        locazione = " (Centrale)" if stato == 'fuori_uso_centrale' else ""
+                        msg += f"• {seriale} - {SEDI[sede]}{locazione}\n"
         
         msg += f"\n📊 **Totale articoli:** {len(articoli)}"
         await update.message.reply_text(msg)
@@ -717,7 +816,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if articoli_cat:
                 msg += f"**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
                 for seriale, sede, _ in articoli_cat:
-                    msg += f"• {seriale} - {SEDI[sede]}\n"
+                    locazione = " (Centrale)" if any(a[0] == seriale and a[3] == 'usato_centrale' for a in get_tutti_articoli()) else ""
+                    msg += f"• {seriale} - {SEDI[sede]}{locazione}\n"
                 msg += "\n"
         
         await update.message.reply_text(msg)
@@ -739,7 +839,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if articoli_cat:
                     msg += f"**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
                     for seriale, sede, _ in articoli_cat:
-                        msg += f"• {seriale} - {SEDI[sede]}\n"
+                        locazione = " (Centrale)" if any(a[0] == seriale and a[3] == 'fuori_uso_centrale' for a in get_tutti_articoli()) else ""
+                        msg += f"• {seriale} - {SEDI[sede]}{locazione}\n"
                     msg += "\n"
             
             msg += "ℹ️ Solo gli amministratori possono modificare lo stato."
@@ -806,8 +907,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         articoli = get_tutti_articoli()
         totale = len(articoli)
         disponibili = len([a for a in articoli if a[3] == 'disponibile'])
-        usati = len([a for a in articoli if a[3] == 'usato'])
-        fuori_uso = len([a for a in articoli if a[3] == 'fuori_uso'])
+        usati = len([a for a in articoli if a[3] in ['usato', 'usato_centrale']])
+        fuori_uso = len([a for a in articoli if a[3] in ['fuori_uso', 'fuori_uso_centrale']])
 
         # NUOVO: BOMBOLE COMBINATE (Erba + Centrale)
         bombole_totali = conta_bombole_disponibili()
@@ -839,9 +940,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "🆘 Help":
         await help_command(update, context)
 
+    # IN CENTRALE - NUOVA FUNZIONALITÀ
+    elif text == "📍 In Centrale":
+        if not is_user_approved(user_id):
+            await update.message.reply_text("❌ Accesso non autorizzato")
+            return
+
+        # Mostra il menu principale per la gestione centrale
+        keyboard = [
+            [InlineKeyboardButton("📤 Sposta Usati in Centrale", callback_data="centrale_sposta_usati")],
+            [InlineKeyboardButton("📤 Sposta Fuori Uso in Centrale", callback_data="centrale_sposta_fuori_uso")],
+            [InlineKeyboardButton("📋 Inventario Centrale", callback_data="centrale_inventario")],
+            [InlineKeyboardButton("📥 Ripristina da Centrale", callback_data="centrale_ripristina")]
+        ]
+        
+        # Conta gli articoli in centrale per il riassunto
+        articoli_centrale = get_articoli_in_centrale()
+        usati_centrale = len([a for a in articoli_centrale if a[3] == 'usato_centrale'])
+        fuori_uso_centrale = len([a for a in articoli_centrale if a[3] == 'fuori_uso_centrale'])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        messaggio = f"🏢 **GESTIONE ARTICOLI IN CENTRALE**\n\n"
+        messaggio += f"📊 **Attualmente in centrale:**\n"
+        messaggio += f"• 🔴 Usati: {usati_centrale}\n"
+        messaggio += f"• ⚫ Fuori uso: {fuori_uso_centrale}\n"
+        messaggio += f"• 📦 Totale: {len(articoli_centrale)}\n\n"
+        messaggio += "Seleziona un'operazione:"
+        
+        await update.message.reply_text(messaggio, reply_markup=reply_markup)
+
     # STATUS SERVER (SOLO PER ADMIN SPECIFICO)
     elif text == "🖥️ Status Server" and user_id == 1816045269:
-        # Mostra lo stato del server e il consumo stimato
+        # Mostra lo stato del server e il consumo estimato
         usage_info = get_render_usage_simple()
         system_info = get_system_metrics()
         
@@ -1051,6 +1181,110 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text(f"❌ {seriale} non trovato!")
 
+    # GESTIONE CENTRALE - MENU PRINCIPALE
+    elif data == "centrale_sposta_usati":
+        articoli_usati = get_articoli_per_stato('usato')
+        if not articoli_usati:
+            await query.edit_message_text("❌ Nessun articolo usato da spostare in centrale")
+            return
+
+        keyboard = []
+        for seriale, cat, sed in articoli_usati:
+            nome = f"{seriale} - {SEDI[sed]}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"centrale_sposta_{seriale}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("📤 Seleziona articolo USATO da spostare in CENTRALE:", reply_markup=reply_markup)
+
+    elif data == "centrale_sposta_fuori_uso":
+        articoli_fuori_uso = get_articoli_per_stato('fuori_uso')
+        if not articoli_fuori_uso:
+            await query.edit_message_text("❌ Nessun articolo fuori uso da spostare in centrale")
+            return
+
+        keyboard = []
+        for seriale, cat, sed in articoli_fuori_uso:
+            nome = f"{seriale} - {SEDI[sed]}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"centrale_sposta_{seriale}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("📤 Seleziona articolo FUORI USO da spostare in CENTRALE:", reply_markup=reply_markup)
+
+    elif data.startswith("centrale_sposta_"):
+        seriale = data[16:]
+        if sposta_in_centrale(seriale):
+            await query.edit_message_text(f"✅ {seriale} spostato in CENTRALE!")
+        else:
+            await query.edit_message_text(f"❌ Impossibile spostare {seriale} in centrale")
+
+    elif data == "centrale_inventario":
+        articoli_centrale = get_articoli_in_centrale()
+        if not articoli_centrale:
+            await query.edit_message_text("🏢 **INVENTARIO CENTRALE**\n\n📦 Nessun articolo in centrale al momento")
+            return
+
+        # Organizza per categoria
+        articoli_organizzati = organizza_articoli_per_categoria([(a[0], a[1], a[2], a[3]) for a in articoli_centrale])
+        
+        msg = "🏢 **INVENTARIO CENTRALE**\n\n"
+        
+        # USATI IN CENTRALE
+        usati_centrale = [a for a in articoli_centrale if a[3] == 'usato_centrale']
+        if usati_centrale:
+            msg += f"🔴 **USATI IN CENTRALE** ({len(usati_centrale)}):\n"
+            usati_organizzati = organizza_articoli_per_categoria([(a[0], a[1], a[2], a[3]) for a in usati_centrale])
+            
+            for categoria in ORDINE_CATEGORIE:
+                articoli_cat = usati_organizzati[categoria]
+                if articoli_cat:
+                    msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                    for seriale, sede, _ in articoli_cat:
+                        msg += f"• {seriale}\n"
+            msg += "\n"
+        
+        # FUORI USO IN CENTRALE
+        fuori_uso_centrale = [a for a in articoli_centrale if a[3] == 'fuori_uso_centrale']
+        if fuori_uso_centrale:
+            msg += f"⚫ **FUORI USO IN CENTRALE** ({len(fuori_uso_centrale)}):\n"
+            fuori_uso_organizzati = organizza_articoli_per_categoria([(a[0], a[1], a[2], a[3]) for a in fuori_uso_centrale])
+            
+            for categoria in ORDINE_CATEGORIE:
+                articoli_cat = fuori_uso_organizzati[categoria]
+                if articoli_cat:
+                    msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                    for seriale, sede, _ in articoli_cat:
+                        msg += f"• {seriale}\n"
+        
+        # RIASSUNTO
+        msg += f"\n📊 **RIASSUNTO CENTRALE:**\n"
+        msg += f"• 🔴 Usati: {len(usati_centrale)}\n"
+        msg += f"• ⚫ Fuori uso: {len(fuori_uso_centrale)}\n"
+        msg += f"• 📦 Totale: {len(articoli_centrale)}"
+        
+        await query.edit_message_text(msg)
+
+    elif data == "centrale_ripristina":
+        articoli_centrale = get_articoli_in_centrale()
+        if not articoli_centrale:
+            await query.edit_message_text("❌ Nessun articolo in centrale da ripristinare")
+            return
+
+        keyboard = []
+        for seriale, cat, sed, stato in articoli_centrale:
+            tipo = "USATO" if stato == "usato_centrale" else "FUORI USO"
+            nome = f"{seriale} - {tipo}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"centrale_ripristina_{seriale}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("📥 Seleziona articolo da RIPRISTINARE da CENTRALE a ERBA:", reply_markup=reply_markup)
+
+    elif data.startswith("centrale_ripristina_"):
+        seriale = data[20:]
+        if ripristina_da_centrale(seriale):
+            await query.edit_message_text(f"✅ {seriale} ripristinato da CENTRALE a ERBA!")
+        else:
+            await query.edit_message_text(f"❌ Impossibile ripristinare {seriale}")
+
 # === ALLARME BOMBOLE ===
 async def controlla_allarme_bombole(context: ContextTypes.DEFAULT_TYPE):
     """NUOVA VERSIONE: controlla allarme basato su TOTALE bombole (Erba + Centrale)"""
@@ -1155,5 +1389,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-#GitHub per Gist:  g h p _ q n F F B t U P Y q 0 8 a c r 3 S j j W H w n 5 J i g P C A 2 5 1 i F c
