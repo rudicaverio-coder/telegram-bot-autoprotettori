@@ -32,7 +32,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 # === DATABASE ===
 def init_db():
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect('autoprotettori_inventario.db')
     c = conn.cursor()
 
     c.execute('''CREATE TABLE IF NOT EXISTS articoli
@@ -1389,3 +1389,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
