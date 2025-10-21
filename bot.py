@@ -80,7 +80,38 @@ def emergency_recreate_database():
     
     conn.close()
 
-# Chiama la funzione di emergenza
+# === VERIFICA INTEGRITÀ DATABASE ===
+def check_database_integrity():
+    """Verifica che il database sia integro e funzionante"""
+    try:
+        conn = sqlite3.connect(DATABASE_NAME)
+        c = conn.cursor()
+        
+        # Verifica se le tabelle esistono e hanno dati
+        c.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('articoli', 'utenti')")
+        table_count = c.fetchone()[0]
+        
+        if table_count < 2:
+            print("🚨 Database corrotto - tabelle mancanti!")
+            conn.close()
+            return False
+            
+        # Verifica alcuni dati
+        c.execute("SELECT COUNT(*) FROM articoli")
+        articoli_count = c.fetchone()[0]
+        
+        c.execute("SELECT COUNT(*) FROM utenti WHERE ruolo = 'admin'")
+        admin_count = c.fetchone()[0]
+        
+        print(f"✅ Database integro - Tabelle: {table_count}, Articoli: {articoli_count}, Admin: {admin_count}")
+        conn.close()
+        return True
+        
+    except Exception as e:
+        print(f"🚨 Errore verifica database: {e}")
+        return False
+
+# Chiama la funzione di emergenza all'avvio
 emergency_recreate_database()
 
 # === CATEGORIE E SEDI ===
@@ -874,7 +905,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         categorie_con_articoli = list(set(categorie_con_articoli))  # Rimuovi duplicati
         
         if not categorie_con_articoli:
-            await update.message.reply_text("⚫ Nessun articolo da segnare come fuori uso")
+            await update.message.reply_text("⚫ Nessun articolo da segnare como fuori uso")
             return
 
         keyboard = []
@@ -883,7 +914,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard.append([InlineKeyboardButton(CATEGORIE[categoria], callback_data=f"crea_fuori_uso_cat_{categoria}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("⚫ Seleziona categoria per SEGNARE come FUORI USO:", reply_markup=reply_markup)
+        await update.message.reply_text("⚫ Seleziona categoria per SEGNARE como FUORI USO:", reply_markup=reply_markup)
 
     # AGGIUNGI (solo admin)
     elif text == "➕ Aggiungi" and is_admin(user_id):
@@ -1053,13 +1084,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton(nome, callback_data=f"usato_{seriale}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(f"🔴 Seleziona {CATEGORIE[categoria]} da segnare come USATO:", reply_markup=reply_markup)
+        await query.edit_message_text(f"🔴 Seleziona {CATEGORIE[categoria]} da segnare como USATO:", reply_markup=reply_markup)
 
     # SEGNA USATO - CONFERMA
     elif data.startswith("usato_"):
         seriale = data[6:]
         update_stato(seriale, "usato")
-        await query.edit_message_text(f"🔴 {seriale} segnato come USATO ✅")
+        await query.edit_message_text(f"🔴 {seriale} segnato como USATO ✅")
 
     # CREA FUORI USO - SELEZIONE CATEGORIA (PER ADMIN)
     elif data.startswith("crea_fuori_uso_cat_"):
@@ -1082,7 +1113,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton(nome, callback_data=f"fuori_uso_{seriale}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(f"⚫ Seleziona {CATEGORIE[categoria]} da segnare come FUORI USO:", reply_markup=reply_markup)
+        await query.edit_message_text(f"⚫ Seleziona {CATEGORIE[categoria]} da segnare como FUORI USO:", reply_markup=reply_markup)
 
     # SEGNA FUORI USO - CONFERMA
     elif data.startswith("fuori_uso_"):
@@ -1092,7 +1123,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         seriale = data[10:]
         update_stato(seriale, "fuori_uso")
-        await query.edit_message_text(f"⚫ {seriale} segnato come FUORI USO ✅")
+        await query.edit_message_text(f"⚫ {seriale} segnato como FUORI USO ✅")
 
     # RIPRISTINA
     elif data.startswith("ripristina_"):
@@ -1367,15 +1398,21 @@ def run_flask():
 def main():
     print("🚀 Avvio Bot Autoprotettori Erba...")
     
-    # Ripristina il database all'avvio se esiste un backup
-    if GITHUB_TOKEN and GIST_ID:
-        print("🔄 Tentativo di ripristino database da backup...")
-        if restore_database_from_gist():
-            print("✅ Database ripristinato con successo!")
-        else:
-            print("ℹ️  Nessun backup trovato o errore, si parte con database nuovo")
+    # 🔒 VERIFICA INTEGRITÀ DATABASE E RIPRISTINO
+    print("🔍 Verifica integrità database...")
+    if not check_database_integrity():
+        print("🔄 Ricreazione database di emergenza...")
+        emergency_recreate_database()
+        
+        # Ripristino da backup se disponibile
+        if GITHUB_TOKEN and GIST_ID:
+            print("🔄 Tentativo ripristino da backup GitHub...")
+            if restore_database_from_gist():
+                print("✅ Database ripristinato dal backup!")
+            else:
+                print("❌ Ripristino fallito, si parte con database vuoto")
     else:
-        print("ℹ️  Backup GitHub non configurato, si parte con database nuovo")
+        print("✅ Database verificato e integro")
     
     # Avvia Flask in un thread separato
     flask_thread = threading.Thread(target=run_flask, daemon=True)
