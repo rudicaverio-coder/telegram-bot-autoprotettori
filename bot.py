@@ -14,6 +14,7 @@ import base64
 import json
 
 # === CONFIGURAZIONE ===
+DATABASE_NAME = 'autoprotettori_v3.db'  # ⬅️ COSTANTE UNICA PER TUTTO IL DATABASE
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_IDS = [1816045269, 653425963, 693843502, 6622015744]
 
@@ -32,7 +33,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 # === DATABASE ===
 def init_db():
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
 
     c.execute('''CREATE TABLE IF NOT EXISTS articoli
@@ -61,6 +62,27 @@ def init_db():
 
 init_db()
 
+# === SISTEMA DI EMERGENZA PER RICREARE TABELLE ===
+def emergency_recreate_database():
+    """Ricrea le tabelle se non esistono - sistema di emergenza"""
+    conn = sqlite3.connect(DATABASE_NAME)
+    c = conn.cursor()
+    
+    try:
+        # Verifica se le tabelle esistono
+        c.execute("SELECT 1 FROM articoli LIMIT 1")
+        c.execute("SELECT 1 FROM utenti LIMIT 1")
+        print("✅ Tabelle database verificate")
+    except sqlite3.OperationalError:
+        print("🚨 TABELLE NON TROVATE! Ricreo il database di emergenza...")
+        init_db()  # Richiama init_db per ricreare tutto
+        print("✅ Database ricreato con successo!")
+    
+    conn.close()
+
+# Chiama la funzione di emergenza
+emergency_recreate_database()
+
 # === CATEGORIE E SEDI ===
 CATEGORIE = {
     "bombola": "⚗️ Bombola",
@@ -85,7 +107,7 @@ ORDINE_CATEGORIE = ["bombola", "maschera", "erogatore", "spallaccio"]
 
 # === FUNZIONI UTILITY ===
 def is_admin(user_id):
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("SELECT ruolo FROM utenti WHERE user_id = ?", (user_id,))
     result = c.fetchone()
@@ -93,7 +115,7 @@ def is_admin(user_id):
     return result and result[0] == 'admin'
 
 def is_user_approved(user_id):
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("SELECT ruolo FROM utenti WHERE user_id = ? AND ruolo IN ('admin', 'user')", (user_id,))
     result = c.fetchone()
@@ -101,7 +123,7 @@ def is_user_approved(user_id):
     return result is not None
 
 def get_richieste_in_attesa():
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute('''SELECT user_id, username, nome, data_richiesta 
                  FROM utenti WHERE ruolo = 'in_attesa' ORDER BY data_richiesta''')
@@ -110,7 +132,7 @@ def get_richieste_in_attesa():
     return result
 
 def approva_utente(user_id):
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute('''UPDATE utenti SET ruolo = 'user', data_approvazione = CURRENT_TIMESTAMP 
                  WHERE user_id = ?''', (user_id,))
@@ -120,7 +142,7 @@ def approva_utente(user_id):
 # === FUNZIONI GESTIONE CENTRALE ===
 def sposta_in_centrale(seriale):
     """Sposta un articolo in centrale mantenendo lo stato originale"""
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     
     # Prima ottieni lo stato attuale
@@ -149,7 +171,7 @@ def sposta_in_centrale(seriale):
 
 def ripristina_da_centrale(seriale):
     """Ripristina un articolo da centrale a Erba"""
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     
     # Prima ottieni lo stato attuale
@@ -178,7 +200,7 @@ def ripristina_da_centrale(seriale):
 
 def get_articoli_in_centrale():
     """Restituisce tutti gli articoli attualmente in centrale"""
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("SELECT seriale, categoria, sede, stato FROM articoli WHERE stato IN ('usato_centrale', 'fuori_uso_centrale')")
     result = c.fetchall()
@@ -187,7 +209,7 @@ def get_articoli_in_centrale():
 
 def get_articoli_per_stato_centrale(stato):
     """Restituisce articoli per stato in centrale"""
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato = ?", (stato,))
     result = c.fetchall()
@@ -202,8 +224,8 @@ def backup_database_to_gist():
         return False
     
     try:
-        # Leggi il database
-        with open('autoprotettori_v3.db', 'rb') as f:
+        # Leggi il database CORRETTO
+        with open(DATABASE_NAME, 'rb') as f:  # ⬅️ USA LA COSTANTE
             db_content = f.read()
         
         # Converti in base64 per Gist
@@ -285,7 +307,7 @@ def restore_database_from_gist():
                 
                 # Decodifica e salva il database
                 db_content = base64.b64decode(db_base64)
-                with open('autoprotettori_v3.db', 'wb') as f:
+                with open(DATABASE_NAME, 'wb') as f:  # ⬅️ USA LA COSTANTE
                     f.write(db_content)
                 
                 print(f"✅ Database ripristinato da backup: {timestamp}")
@@ -453,7 +475,7 @@ def get_prefisso_categoria(categoria):
     return prefissi.get(categoria, "ART")
 
 def insert_articolo(seriale, categoria, sede, stato="disponibile"):
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     try:
         c.execute('''INSERT INTO articoli (seriale, categoria, sede, stato) 
@@ -466,7 +488,7 @@ def insert_articolo(seriale, categoria, sede, stato="disponibile"):
         conn.close()
 
 def get_articolo(seriale):
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("SELECT * FROM articoli WHERE seriale = ?", (seriale,))
     result = c.fetchone()
@@ -474,21 +496,21 @@ def get_articolo(seriale):
     return result
 
 def update_stato(seriale, stato):
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("UPDATE articoli SET stato = ? WHERE seriale = ?", (stato, seriale))
     conn.commit()
     conn.close()
 
 def delete_articolo(seriale):
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("DELETE FROM articoli WHERE seriale = ?", (seriale,))
     conn.commit()
     conn.close()
 
 def get_articoli_per_stato(stato):
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     
     # Gestisce sia stati base che stati combinati
@@ -508,7 +530,7 @@ def get_articoli_per_stato(stato):
     return result
 
 def get_articoli_per_categoria(categoria):
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("SELECT seriale, categoria, sede, stato FROM articoli WHERE categoria = ?", (categoria,))
     result = c.fetchall()
@@ -516,7 +538,7 @@ def get_articoli_per_categoria(categoria):
     return result
 
 def get_tutti_articoli():
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("SELECT seriale, categoria, sede, stato FROM articoli")
     result = c.fetchall()
@@ -525,7 +547,7 @@ def get_tutti_articoli():
 
 def conta_bombole_disponibili():
     """CONTA TOTALE BOMBOLE (Erba + Centrale) - NUOVA VERSIONE"""
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute('''SELECT COUNT(*) FROM articoli 
                  WHERE categoria = 'bombola' AND stato = 'disponibile' ''')
@@ -535,7 +557,7 @@ def conta_bombole_disponibili():
 
 def get_categorie_con_articoli(stato=None):
     """Restituisce le categorie che hanno articoli in un determinato stato"""
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     
     if stato:
@@ -627,7 +649,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
     
-    conn = sqlite3.connect('autoprotettori_v3.db')
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute('''INSERT OR IGNORE INTO utenti (user_id, username, nome, ruolo) 
                  VALUES (?, ?, ?, 'in_attesa')''', 
@@ -1109,7 +1131,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         user_id_rifiutare = int(data[8:])
-        conn = sqlite3.connect('autoprotettori_v3.db')
+        conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
         c = conn.cursor()
         c.execute("DELETE FROM utenti WHERE user_id = ?", (user_id_rifiutare,))
         conn.commit()
@@ -1389,5 +1411,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
