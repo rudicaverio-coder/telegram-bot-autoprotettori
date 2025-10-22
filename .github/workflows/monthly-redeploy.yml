@@ -1,0 +1,20 @@
+name: Monthly Auto-Redeploy
+
+on:
+  schedule:
+    # 1° del mese alle 00:05 UTC (dopo il reset ore Render)
+    - cron: '5 0 1 * *'
+  workflow_dispatch:  # Permette redeploy manuale
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Monthly Redeploy
+        run: |
+          echo "🔄 Triggering monthly redeploy..."
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Accept: application/vnd.render.v1+json" \
+            "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys"
+          echo "✅ Redeploy triggered successfully!"
