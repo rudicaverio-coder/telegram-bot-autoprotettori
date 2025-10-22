@@ -111,9 +111,6 @@ def check_database_integrity():
         print(f"🚨 Errore verifica database: {e}")
         return False
 
-# Chiama la funzione di emergenza all'avvio
-emergency_recreate_database()
-
 # === CATEGORIE E SEDI ===
 CATEGORIE = {
     "bombola": "⚗️ Bombola",
@@ -238,11 +235,22 @@ def get_articoli_in_centrale():
     conn.close()
     return result
 
-def get_articoli_per_stato_centrale(stato):
-    """Restituisce articoli per stato in centrale"""
-    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
+def get_articoli_per_stato_centrale(stato, escludi_centrale=True):
+    """Restituisce articoli per stato in centrale, escludendo quelli già in centrale"""
+    conn = sqlite3.connect(DATABASE_NAME)
     c = conn.cursor()
-    c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato = ?", (stato,))
+    
+    if escludi_centrale:
+        # Esclude gli articoli già in centrale
+        if stato == 'usato':
+            c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato = ? AND stato != 'usato_centrale'", (stato,))
+        elif stato == 'fuori_uso':
+            c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato = ? AND stato != 'fuori_uso_centrale'", (stato,))
+        else:
+            c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato = ?", (stato,))
+    else:
+        c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato = ?", (stato,))
+        
     result = c.fetchall()
     conn.close()
     return result
@@ -354,20 +362,40 @@ def restore_database_from_gist():
         print(f"❌ Errore durante restore: {str(e)}")
         return False
 
-# === BACKUP AUTOMATICO OGNI 30 MINUTI ===
-def backup_scheduler():
-    """Scheduler per backup automatici"""
-    print("🔄 Scheduler backup avviato (ogni 30 minuti)")
+def restore_on_startup():
+    """Tenta il ripristino del database all'avvio"""
+    if not GITHUB_TOKEN or not GIST_ID:
+        print("❌ Token o Gist ID non configurati - restore disabilitato")
+        return False
     
-    # Primo backup immediato all'avvio
+    print("🔄 Tentativo di ripristino database da backup...")
+    if restore_database_from_gist():
+        print("✅ Database ripristinato dal backup GitHub!")
+        return True
+    else:
+        print("❌ Ripristino fallito, si parte con database nuovo")
+        # Ricrea almeno gli admin
+        init_db()
+        return False
+
+# === BACKUP AUTOMATICO OGNI 25 MINUTI ===
+def backup_scheduler():
+    """Scheduler per backup automatici migliorato"""
+    print("🔄 Scheduler backup avviato (ogni 25 minuti)")
+    
+    # Backup immediato all'avvio
     time.sleep(10)
     print("🔄 Backup iniziale in corso...")
     backup_database_to_gist()
     
+    # Backup ogni 25 minuti per sicurezza
     while True:
-        time.sleep(1800)  # 30 minuti
+        time.sleep(1500)  # 25 minuti invece di 30 per sicurezza
         print("🔄 Backup automatico in corso...")
-        backup_database_to_gist()
+        if backup_database_to_gist():
+            print("✅ Backup completato con successo")
+        else:
+            print("❌ Backup fallito, riprovo al prossimo ciclo")
 
 # === SISTEMA KEEP-ALIVE ULTRA-AGGRESSIVO ===
 def keep_alive_aggressive():
@@ -645,7 +673,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🔄 **SISTEMA SEMPRE ATTIVO:**
 • ✅ Ping automatici ogni 5 minuti
-• ✅ Backup automatico ogni 30 minuti
+• ✅ Backup automatico ogni 25 minuti
 • ✅ Zero tempi di attesa
 • ✅ Servizio 24/7 garantito
 """
@@ -832,7 +860,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard.append([InlineKeyboardButton(CATEGORIE[categoria], callback_data=f"usato_cat_{categoria}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("🔴 Seleziona categoria per segnare come USATO:", reply_markup=reply_markup)
+        await update.message.reply_text("🔴 Seleziona categoria per segnare como USATO:", reply_markup=reply_markup)
 
     # DISPONIBILI
     elif text == "🟢 Disponibili":
@@ -1171,7 +1199,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Dopo il rifiuto, mostra se ci sono altre richieste
         richieste_rimanenti = get_richieste_in_attesa()
         if richieste_rimanenti:
-            messaggio_aggiuntivo = f"\n\n📋 Ci sono ancora {len(richieste_rimanenti)} richieste in attesa.\nUsa nuovamente '👥 Gestisci Richieste' per continuare."
+            messaggio_aggiuntivo = f"\n\n📋 Ci sono ancora {len(richieste_rimanenti)} richieste in attesa.\nUsa nuovamente '👥 Gestisci Richieste' para continuare."
         else:
             messaggio_aggiuntivo = "\n\n✅ Tutte le richieste sono state gestite."
             
@@ -1236,9 +1264,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # GESTIONE CENTRALE - MENU PRINCIPALE
     elif data == "centrale_sposta_usati":
-        articoli_usati = get_articoli_per_stato('usato')
+        # MODIFICA: usa la nuova funzione che esclude quelli già in centrale
+        articoli_usati = get_articoli_per_stato_centrale('usato', escludi_centrale=True)
         if not articoli_usati:
-            await query.edit_message_text("❌ Nessun articolo usato da spostare in centrale")
+            await query.edit_message_text("❌ Nessun articolo usato da spostare in centrale (o tutti già in centrale)")
             return
 
         keyboard = []
@@ -1250,9 +1279,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("📤 Seleziona articolo USATO da spostare in CENTRALE:", reply_markup=reply_markup)
 
     elif data == "centrale_sposta_fuori_uso":
-        articoli_fuori_uso = get_articoli_per_stato('fuori_uso')
+        # MODIFICA: usa la nuova funzione che esclude quelli già in centrale
+        articoli_fuori_uso = get_articoli_per_stato_centrale('fuori_uso', escludi_centrale=True)
         if not articoli_fuori_uso:
-            await query.edit_message_text("❌ Nessun articolo fuori uso da spostare in centrale")
+            await query.edit_message_text("❌ Nessun articolo fuori uso da spostare in centrale (o tutti già in centrale)")
             return
 
         keyboard = []
@@ -1398,21 +1428,16 @@ def run_flask():
 def main():
     print("🚀 Avvio Bot Autoprotettori Erba...")
     
-    # 🔒 VERIFICA INTEGRITÀ DATABASE E RIPRISTINO
+    # 🔄 RIPRISTINO AUTOMATICO ALL'AVVIO
+    if not restore_on_startup():
+        print("🔄 Inizializzazione database nuovo...")
+        init_db()
+    
+    # 🔒 VERIFICA INTEGRITÀ DATABASE
     print("🔍 Verifica integrità database...")
     if not check_database_integrity():
         print("🔄 Ricreazione database di emergenza...")
         emergency_recreate_database()
-        
-        # Ripristino da backup se disponibile
-        if GITHUB_TOKEN and GIST_ID:
-            print("🔄 Tentativo ripristino da backup GitHub...")
-            if restore_database_from_gist():
-                print("✅ Database ripristinato dal backup!")
-            else:
-                print("❌ Ripristino fallito, si parte con database vuoto")
-    else:
-        print("✅ Database verificato e integro")
     
     # Avvia Flask in un thread separato
     flask_thread = threading.Thread(target=run_flask, daemon=True)
@@ -1427,7 +1452,7 @@ def main():
     # 🔄 AVVIA SCHEDULER BACKUP AUTOMATICO
     backup_thread = threading.Thread(target=backup_scheduler, daemon=True)
     backup_thread.start()
-    print("✅ Scheduler backup attivato! Backup ogni 30 minuti")
+    print("✅ Scheduler backup attivato! Backup ogni 25 minuti")
     
     application = Application.builder().token(BOT_TOKEN).build()
     
@@ -1442,7 +1467,7 @@ def main():
     print("💾 Database: SQLite3 con backup automatico")
     print("👥 Admin configurati:", len(ADMIN_IDS))
     print("⏰ Ping automatici ogni 5 minuti - Zero spin down! 🚀")
-    print("💾 Backup automatici ogni 30 minuti - Dati al sicuro! 🛡️")
+    print("💾 Backup automatici ogni 25 minuti - Dati al sicuro! 🛡️")
     
     application.run_polling()
 
