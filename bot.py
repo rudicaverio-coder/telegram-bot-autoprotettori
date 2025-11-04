@@ -686,48 +686,66 @@ def ricostruisci_database_da_inventario(testo_inventario):
         stato_corrente = None
         articoli_inseriti = 0
         errori = 0
+        articoli_invalidi = []
         
-        for line in lines:
+        print(f"🔍 Analizzando {len(lines)} righe...")  # DEBUG
+        
+        for i, line in enumerate(lines):
             line = line.strip()
+            #print(f"Riga {i}: {line}")  # DEBUG
             
-            # Controlla se è un header di stato
+            # Controlla se è un header di STATO (DISPONIBILI, USATI, FUORI USO)
             for stato_testo, stato_db in mappatura_stati.items():
                 if stato_testo in line:
                     stato_corrente = stato_db
                     categoria_corrente = None
+                    print(f"📌 Trovato stato: {stato_testo} -> {stato_db}")  # DEBUG
                     break
             
-            # Controlla se è un header di categoria
+            # Controlla se è un header di CATEGORIA (Bombola, Maschera, etc.)
             for cat_testo, cat_db in mappatura_categorie.items():
-                if cat_testo in line and "**" in line:
+                if cat_testo in line and ":" in line:  # Cerca ":" che indica una categoria
                     categoria_corrente = cat_db
+                    print(f"📌 Trovata categoria: {cat_testo} -> {cat_db}")  # DEBUG
                     break
             
-            # Se è un articolo (inizia con •)
+            # Se è un articolo (inizia con • e abbiamo stato e categoria)
             if line.startswith('•') and categoria_corrente and stato_corrente:
                 try:
                     # Estrai il seriale (es: "• BOMB_001_ERBA - 🌿 Erba" -> "BOMB_001_ERBA")
-                    parts = line.split(' - ')[0]  # Prende "• BOMB_001_ERBA"
-                    seriale = parts[2:].strip()  # Rimuove "• " e spazi
+                    if ' - ' in line:
+                        parts = line.split(' - ')[0]  # Prende "• BOMB_001_ERBA"
+                        seriale = parts[2:].strip()  # Rimuove "• " e spazi
+                    else:
+                        # Se non c'è " - ", prendi tutto dopo il •
+                        seriale = line[2:].strip()
                     
-                    # Estrai la sede
+                    print(f"🔍 Trovato articolo: {seriale}")  # DEBUG
+                    
+                    # Estrai la sede dal testo
                     sede_trovata = None
                     for sede_testo, sede_db in mappatura_sedi.items():
                         if sede_testo in line:
                             sede_trovata = sede_db
                             break
                     
-                    if sede_trovata:
+                    if not sede_trovata:
+                        # Se non trova la sede nel testo, prova a dedurla dal seriale
+                        if seriale.endswith('_ERBA'):
+                            sede_trovata = 'erba'
+                        elif seriale.endswith('_CENTRALE'):
+                            sede_trovata = 'centrale'
+                    
+                    if sede_trovata and seriale:
                         # Gestisci stati speciali per centrale
+                        stato_finale = stato_corrente
                         if " (Centrale)" in line:
                             if stato_corrente == "usato":
                                 stato_finale = "usato_centrale"
                             elif stato_corrente == "fuori_uso":
                                 stato_finale = "fuori_uso_centrale"
-                            else:
-                                stato_finale = stato_corrente
-                        else:
-                            stato_finale = stato_corrente
+                        
+                        print(f"✅ Inserendo: {seriale}, {categoria_corrente}, {sede_trovata}, {stato_finale}")  # DEBUG
                         
                         # Inserisci nel database
                         c.execute('''INSERT OR IGNORE INTO articoli (seriale, categoria, sede, stato) 
@@ -735,19 +753,40 @@ def ricostruisci_database_da_inventario(testo_inventario):
                         
                         if c.rowcount > 0:
                             articoli_inseriti += 1
+                            print(f"✅ Articolo inserito: {seriale}")  # DEBUG
                         else:
                             errori += 1  # Duplicato o errore
+                            print(f"❌ Duplicato/salto: {seriale}")  # DEBUG
+                    else:
+                        errori += 1
+                        articoli_invalidi.append(f"{seriale} (sede non trovata)")
+                        print(f"❌ Sede non trovata per: {seriale}")  # DEBUG
                             
                 except Exception as e:
                     errori += 1
-                    print(f"Errore elaborazione riga: {line} - {e}")
+                    articoli_invalidi.append(line)
+                    print(f"❌ Errore elaborazione riga: {line} - {e}")
         
         conn.commit()
         conn.close()
         
-        return True, f"✅ Database ricostruito con successo!\n• Articoli inseriti: {articoli_inseriti}\n• Errori/duplicati: {errori}"
+        print(f"📊 Ricostruzione completata: {articoli_inseriti} inseriti, {errori} errori")  # DEBUG
+        
+        messaggio = f"✅ Database ricostruito con successo!\n• Articoli inseriti: {articoli_inseriti}\n• Errori/duplicati: {errori}"
+        
+        if articoli_invalidi:
+            messaggio += f"\n\n❌ Articoli con problemi (saltati):\n"
+            for invalido in articoli_invalidi[:10]:  # Mostra solo primi 10 per non appesantire
+                messaggio += f"• {invalido}\n"
+            if len(articoli_invalidi) > 10:
+                messaggio += f"• ... e altri {len(articoli_invalidi) - 10} articoli\n"
+        
+        return True, messaggio
         
     except Exception as e:
+        import traceback
+        print(f"🚨 Errore grave durante ricostruzione: {str(e)}")
+        print(traceback.format_exc())
         return False, f"❌ Errore durante la ricostruzione: {str(e)}"
 
 # === FUNZIONE HELP ===
