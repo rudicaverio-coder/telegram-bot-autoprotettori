@@ -1895,6 +1895,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if 'selezioni_centrale_fuori_uso' in context.user_data:
             del context.user_data['selezioni_centrale_fuori_uso']
 
+    # GESTIONE CENTRALE - INVENTARIO
     elif data == "centrale_inventario":
         articoli_centrale = get_articoli_in_centrale()
         if not articoli_centrale:
