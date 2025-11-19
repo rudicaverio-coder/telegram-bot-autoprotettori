@@ -1131,6 +1131,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         keyboard = []
+        # ORDINA PER CODICE (dal basso all'alto)
+        articoli.sort(key=lambda x: x[0], reverse=True)
         for seriale, cat, sed in articoli:
             stato_attuale = "usato" if (seriale, cat, sed) in articoli_usati else "fuori uso"
             nome = f"{seriale} - {CATEGORIE[cat]} ({stato_attuale})"
@@ -1305,35 +1307,82 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"❌ Nessun articolo disponibile per {CATEGORIE[categoria]}")
             return
 
+        # Inizializza la lista delle selezioni per questa categoria
+        context.user_data['selezioni_usato'] = []
+        context.user_data['categoria_corrente'] = categoria
+        
         keyboard = []
         # ORDINA PER CODICE (dal basso all'alto)
         articoli_categoria.sort(key=lambda x: x[0], reverse=True)
         for seriale, cat, sed in articoli_categoria:
             nome = f"{seriale} - {SEDI[sed]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"usato_{seriale}")])
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_usato_{seriale}")])
         
-        # Aggiungi pulsante per selezione multipla
+        # Aggiungi pulsante per conferma selezione
         keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data=f"conferma_usato_{categoria}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             f"🔴 Seleziona {CATEGORIE[categoria]} da segnare como USATO:\n\n"
-            f"🟢 Puoi selezionare più articoli prima di confermare",
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: 0",
             reply_markup=reply_markup
         )
 
-    # SEGNA USATO - CONFERMA SELEZIONE MULTIPLA
-    elif data.startswith("conferma_usato_"):
-        categoria = data[15:]
-        # Qui puoi implementare la logica per processare tutti gli articoli selezionati
-        # Per ora manteniamo il comportamento originale di selezione singola
-        await query.answer("Funzionalità selezione multipla in sviluppo!", show_alert=True)
+    # SELEZIONE ARTICOLO USATO (aggiunge/rimuove dalla lista)
+    elif data.startswith("seleziona_usato_"):
+        seriale = data[16:]
+        selezioni = context.user_data.get('selezioni_usato', [])
+        
+        if seriale in selezioni:
+            selezioni.remove(seriale)
+        else:
+            selezioni.append(seriale)
+        
+        context.user_data['selezioni_usato'] = selezioni
+        
+        # Ricrea la tastiera aggiornata
+        categoria = context.user_data.get('categoria_corrente', '')
+        articoli = get_articoli_per_stato('disponibile')
+        articoli_categoria = [a for a in articoli if a[1] == categoria]
+        
+        keyboard = []
+        articoli_categoria.sort(key=lambda x: x[0], reverse=True)
+        for art_seriale, cat, sed in articoli_categoria:
+            nome = f"{art_seriale} - {SEDI[sed]}"
+            if art_seriale in selezioni:
+                nome = f"✅ {nome}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_usato_{art_seriale}")])
+        
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data=f"conferma_usato_{categoria}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"🔴 Seleziona {CATEGORIE[categoria]} da segnare como USATO:\n\n"
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: {len(selezioni)}",
+            reply_markup=reply_markup
+        )
 
-    # SEGNA USATO - CONFERMA SINGOLA
-    elif data.startswith("usato_"):
-        seriale = data[6:]
-        update_stato(seriale, "usato")
-        await query.edit_message_text(f"🔴 {seriale} segnato como USATO ✅")
+    # CONFERMA SELEZIONE USATO
+    elif data.startswith("conferma_usato_"):
+        selezioni = context.user_data.get('selezioni_usato', [])
+        
+        if not selezioni:
+            await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
+            return
+        
+        # Processa tutti gli articoli selezionati
+        for seriale in selezioni:
+            update_stato(seriale, "usato")
+        
+        await query.edit_message_text(f"✅ {len(selezioni)} articoli segnati como USATI!")
+        
+        # Pulisci i dati temporanei
+        if 'selezioni_usato' in context.user_data:
+            del context.user_data['selezioni_usato']
+        if 'categoria_corrente' in context.user_data:
+            del context.user_data['categoria_corrente']
 
     # CREA FUORI USO - SELEZIONE CATEGORIA (PER ADMIN)
     elif data.startswith("crea_fuori_uso_cat_"):
@@ -1350,32 +1399,91 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"❌ Nessun articolo per {CATEGORIE[categoria]}")
             return
 
+        # Inizializza la lista delle selezioni
+        context.user_data['selezioni_fuori_uso'] = []
+        context.user_data['categoria_corrente_fuori_uso'] = categoria
+        
         keyboard = []
         # ORDINA PER CODICE (dal basso all'alto)
         articoli_categoria.sort(key=lambda x: x[0], reverse=True)
         for seriale, cat, sed in articoli_categoria:
             nome = f"{seriale} - {SEDI[sed]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"fuori_uso_{seriale}")])
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_fuori_uso_{seriale}")])
         
-        # Aggiungi pulsante per selezione multipla
+        # Aggiungi pulsante per conferma selezione
         keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data=f"conferma_fuori_uso_{categoria}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             f"⚫ Seleziona {CATEGORIE[categoria]} da segnare como FUORI USO:\n\n"
-            f"🟢 Puoi selezionare più articoli prima di confermare",
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: 0",
             reply_markup=reply_markup
         )
 
-    # SEGNA FUORI USO - CONFERMA
-    elif data.startswith("fuori_uso_"):
+    # SELEZIONE ARTICOLO FUORI USO (aggiunge/rimuove dalla lista)
+    elif data.startswith("seleziona_fuori_uso_"):
         if not is_admin(user_id):
             await query.answer("❌ Solo gli amministratori possono mettere articoli fuori uso!", show_alert=True)
             return
             
-        seriale = data[10:]
-        update_stato(seriale, "fuori_uso")
-        await query.edit_message_text(f"⚫ {seriale} segnato como FUORI USO ✅")
+        seriale = data[20:]
+        selezioni = context.user_data.get('selezioni_fuori_uso', [])
+        
+        if seriale in selezioni:
+            selezioni.remove(seriale)
+        else:
+            selezioni.append(seriale)
+        
+        context.user_data['selezioni_fuori_uso'] = selezioni
+        
+        # Ricrea la tastiera aggiornata
+        categoria = context.user_data.get('categoria_corrente_fuori_uso', '')
+        articoli_disponibili = get_articoli_per_stato('disponibile')
+        articoli_usati = get_articoli_per_stato('usato')
+        articoli_categoria = [a for a in articoli_disponibili + articoli_usati if a[1] == categoria]
+        
+        keyboard = []
+        articoli_categoria.sort(key=lambda x: x[0], reverse=True)
+        for art_seriale, cat, sed in articoli_categoria:
+            nome = f"{art_seriale} - {SEDI[sed]}"
+            if art_seriale in selezioni:
+                nome = f"✅ {nome}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_fuori_uso_{art_seriale}")])
+        
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data=f"conferma_fuori_uso_{categoria}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"⚫ Seleziona {CATEGORIE[categoria]} da segnare como FUORI USO:\n\n"
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: {len(selezioni)}",
+            reply_markup=reply_markup
+        )
+
+    # CONFERMA SELEZIONE FUORI USO
+    elif data.startswith("conferma_fuori_uso_"):
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono mettere articoli fuori uso!", show_alert=True)
+            return
+            
+        selezioni = context.user_data.get('selezioni_fuori_uso', [])
+        
+        if not selezioni:
+            await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
+            return
+        
+        # Processa tutti gli articoli selezionati
+        for seriale in selezioni:
+            update_stato(seriale, "fuori_uso")
+        
+        await query.edit_message_text(f"✅ {len(selezioni)} articoli segnati como FUORI USO!")
+        
+        # Pulisci i dati temporanei
+        if 'selezioni_fuori_uso' in context.user_data:
+            del context.user_data['selezioni_fuori_uso']
+        if 'categoria_corrente_fuori_uso' in context.user_data:
+            del context.user_data['categoria_corrente_fuori_uso']
 
     # RIPRISTINA
     elif data.startswith("ripristina_"):
@@ -1490,61 +1598,167 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text(f"❌ {seriale} non trovato!")
 
-    # GESTIONE CENTRALE - MENU PRINCIPALE
+    # GESTIONE CENTRALE - SPOSTA USATI
     elif data == "centrale_sposta_usati":
-        # MODIFICA: usa la nuova funzione che esclude quelli già in centrale
         articoli_usati = get_articoli_per_stato_centrale('usato', escludi_centrale=True)
         if not articoli_usati:
             await query.edit_message_text("❌ Nessun articolo usato da spostare in centrale (o tutti già in centrale)")
             return
 
+        # Inizializza la lista delle selezioni
+        context.user_data['selezioni_centrale_usati'] = []
+        
         keyboard = []
         # ORDINA PER CODICE (dal basso all'alto)
         articoli_usati.sort(key=lambda x: x[0], reverse=True)
         for seriale, cat, sed in articoli_usati:
             nome = f"{seriale} - {SEDI[sed]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"centrale_sposta_{seriale}")])
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_usato_{seriale}")])
         
-        # Aggiungi pulsante per selezione multipla
+        # Aggiungi pulsante per conferma selezione
         keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_usati")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             "📤 Seleziona articoli USATI da spostare in CENTRALE:\n\n"
-            "🟢 Puoi selezionare più articoli prima di confermare",
+            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            "📝 Articoli selezionati: 0",
             reply_markup=reply_markup
         )
 
+    # SELEZIONE ARTICOLO USATO PER CENTRALE
+    elif data.startswith("seleziona_centrale_usato_"):
+        seriale = data[24:]
+        selezioni = context.user_data.get('selezioni_centrale_usati', [])
+        
+        if seriale in selezioni:
+            selezioni.remove(seriale)
+        else:
+            selezioni.append(seriale)
+        
+        context.user_data['selezioni_centrale_usati'] = selezioni
+        
+        # Ricrea la tastiera aggiornata
+        articoli_usati = get_articoli_per_stato_centrale('usato', escludi_centrale=True)
+        
+        keyboard = []
+        articoli_usati.sort(key=lambda x: x[0], reverse=True)
+        for art_seriale, cat, sed in articoli_usati:
+            nome = f"{art_seriale} - {SEDI[sed]}"
+            if art_seriale in selezioni:
+                nome = f"✅ {nome}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_usato_{art_seriale}")])
+        
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_usati")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "📤 Seleziona articoli USATI da spostare in CENTRALE:\n\n"
+            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            "📝 Articoli selezionati: {len(selezioni)}",
+            reply_markup=reply_markup
+        )
+
+    # CONFERMA SPOSTAMENTO USATI IN CENTRALE
+    elif data == "conferma_centrale_usati":
+        selezioni = context.user_data.get('selezioni_centrale_usati', [])
+        
+        if not selezioni:
+            await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
+            return
+        
+        # Processa tutti gli articoli selezionati
+        success_count = 0
+        for seriale in selezioni:
+            if sposta_in_centrale(seriale):
+                success_count += 1
+        
+        await query.edit_message_text(f"✅ {success_count} articoli usati spostati in CENTRALE!")
+        
+        # Pulisci i dati temporanei
+        if 'selezioni_centrale_usati' in context.user_data:
+            del context.user_data['selezioni_centrale_usati']
+
+    # GESTIONE CENTRALE - SPOSTA FUORI USO
     elif data == "centrale_sposta_fuori_uso":
-        # MODIFICA: usa la nuova funzione che esclude quelli già in centrale
         articoli_fuori_uso = get_articoli_per_stato_centrale('fuori_uso', escludi_centrale=True)
         if not articoli_fuori_uso:
             await query.edit_message_text("❌ Nessun articolo fuori uso da spostare in centrale (o tutti già in centrale)")
             return
 
+        # Inizializza la lista delle selezioni
+        context.user_data['selezioni_centrale_fuori_uso'] = []
+        
         keyboard = []
         # ORDINA PER CODICE (dal basso all'alto)
         articoli_fuori_uso.sort(key=lambda x: x[0], reverse=True)
         for seriale, cat, sed in articoli_fuori_uso:
             nome = f"{seriale} - {SEDI[sed]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"centrale_sposta_{seriale}")])
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_fuori_uso_{seriale}")])
         
-        # Aggiungi pulsante per selezione multipla
+        # Aggiungi pulsante per conferma selezione
         keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_fuori_uso")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             "📤 Seleziona articoli FUORI USO da spostare in CENTRALE:\n\n"
-            "🟢 Puoi selezionare più articoli prima di confermare",
+            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            "📝 Articoli selezionati: 0",
             reply_markup=reply_markup
         )
 
-    elif data.startswith("centrale_sposta_"):
-        seriale = data[16:]
-        if sposta_in_centrale(seriale):
-            await query.edit_message_text(f"✅ {seriale} spostato in CENTRALE!")
+    # SELEZIONE ARTICOLO FUORI USO PER CENTRALE
+    elif data.startswith("seleziona_centrale_fuori_uso_"):
+        seriale = data[28:]
+        selezioni = context.user_data.get('selezioni_centrale_fuori_uso', [])
+        
+        if seriale in selezioni:
+            selezioni.remove(seriale)
         else:
-            await query.edit_message_text(f"❌ Impossibile spostare {seriale} in centrale")
+            selezioni.append(seriale)
+        
+        context.user_data['selezioni_centrale_fuori_uso'] = selezioni
+        
+        # Ricrea la tastiera aggiornata
+        articoli_fuori_uso = get_articoli_per_stato_centrale('fuori_uso', escludi_centrale=True)
+        
+        keyboard = []
+        articoli_fuori_uso.sort(key=lambda x: x[0], reverse=True)
+        for art_seriale, cat, sed in articoli_fuori_uso:
+            nome = f"{art_seriale} - {SEDI[sed]}"
+            if art_seriale in selezioni:
+                nome = f"✅ {nome}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_fuori_uso_{art_seriale}")])
+        
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_fuori_uso")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "📤 Seleziona articoli FUORI USO da spostare in CENTRALE:\n\n"
+            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            "📝 Articoli selezionati: {len(selezioni)}",
+            reply_markup=reply_markup
+        )
+
+    # CONFERMA SPOSTAMENTO FUORI USO IN CENTRALE
+    elif data == "conferma_centrale_fuori_uso":
+        selezioni = context.user_data.get('selezioni_centrale_fuori_uso', [])
+        
+        if not selezioni:
+            await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
+            return
+        
+        # Processa tutti gli articoli selezionati
+        success_count = 0
+        for seriale in selezioni:
+            if sposta_in_centrale(seriale):
+                success_count += 1
+        
+        await query.edit_message_text(f"✅ {success_count} articoli fuori uso spostati in CENTRALE!")
+        
+        # Pulisci i dati temporanei
+        if 'selezioni_centrale_fuori_uso' in context.user_data:
+            del context.user_data['selezioni_centrale_fuori_uso']
 
     elif data == "centrale_inventario":
         articoli_centrale = get_articoli_in_centrale()
