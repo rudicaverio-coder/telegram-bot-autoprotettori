@@ -1773,17 +1773,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         context.user_data['selezioni_centrale_usati'] = selezioni
         
-        # Ricrea la tastiera aggiornata
+        # Ricrea la tastiera aggiornata con le spunte
         articoli_usati = get_articoli_per_stato_centrale('usato', escludi_centrale=True)
         
         keyboard = []
+        # ORDINA PER CODICE (dal basso all'alto)
         articoli_usati.sort(key=lambda x: x[0], reverse=True)
         for art_seriale, cat, sed in articoli_usati:
             nome = f"{art_seriale} - {SEDI[sed]}"
+            # AGGIUNGI LA SPUNTA SE SELEZIONATO
             if art_seriale in selezioni:
                 nome = f"✅ {nome}"
             keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_usato_{art_seriale}")])
         
+        # Aggiungi pulsante per conferma selezione
         keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_usati")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1854,17 +1857,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         context.user_data['selezioni_centrale_fuori_uso'] = selezioni
         
-        # Ricrea la tastiera aggiornata
+        # Ricrea la tastiera aggiornata con le spunte
         articoli_fuori_uso = get_articoli_per_stato_centrale('fuori_uso', escludi_centrale=True)
         
         keyboard = []
+        # ORDINA PER CODICE (dal basso all'alto)
         articoli_fuori_uso.sort(key=lambda x: x[0], reverse=True)
         for art_seriale, cat, sed in articoli_fuori_uso:
             nome = f"{art_seriale} - {SEDI[sed]}"
+            # AGGIUNGI LA SPUNTA SE SELEZIONATO
             if art_seriale in selezioni:
                 nome = f"✅ {nome}"
             keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_fuori_uso_{art_seriale}")])
         
+        # Aggiungi pulsante per conferma selezione
         keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_fuori_uso")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
