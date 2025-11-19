@@ -1120,7 +1120,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("➖ Seleziona categoria:", reply_markup=reply_markup)
 
-    # RIPRISTINA (solo admin)
+    # RIPRISTINA (solo admin) - MODIFICATO PER SELEZIONE MULTIPLA
     elif text == "🔄 Ripristina" and is_admin(user_id):
         articoli_usati = get_articoli_per_stato('usato')
         articoli_fuori_uso = get_articoli_per_stato('fuori_uso')
@@ -1130,16 +1130,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ Nessun articolo da ripristinare")
             return
 
+        # Inizializza la lista delle selezioni
+        context.user_data['selezioni_ripristina'] = []
+        
         keyboard = []
         # ORDINA PER CODICE (dal basso all'alto)
         articoli.sort(key=lambda x: x[0], reverse=True)
         for seriale, cat, sed in articoli:
             stato_attuale = "usato" if (seriale, cat, sed) in articoli_usati else "fuori uso"
             nome = f"{seriale} - {CATEGORIE[cat]} ({stato_attuale})"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"ripristina_{seriale}")])
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_ripristina_{seriale}")])
+        
+        # Aggiungi pulsante per conferma selezione
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_ripristina")])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("🔄 Seleziona articolo da ripristinare:", reply_markup=reply_markup)
+        await update.message.reply_text(
+            "🔄 Seleziona articoli da ripristinare a DISPONIBILE:\n\n"
+            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            "📝 Articoli selezionati: 0",
+            reply_markup=reply_markup
+        )
 
     # STATISTICHE (solo admin) - NUOVA VERSIONE CON BOMBOLE COMBINATE
     elif text == "📊 Statistiche" and is_admin(user_id):
@@ -1485,11 +1496,67 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if 'categoria_corrente_fuori_uso' in context.user_data:
             del context.user_data['categoria_corrente_fuori_uso']
 
-    # RIPRISTINA
-    elif data.startswith("ripristina_"):
-        seriale = data[11:]
-        update_stato(seriale, "disponibile")
-        await query.edit_message_text(f"🔄 {seriale} ripristinato a DISPONIBILE ✅")
+    # SELEZIONE RIPRISTINA (aggiunge/rimuove dalla lista)
+    elif data.startswith("seleziona_ripristina_"):
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono ripristinare articoli!", show_alert=True)
+            return
+            
+        seriale = data[21:]
+        selezioni = context.user_data.get('selezioni_ripristina', [])
+        
+        if seriale in selezioni:
+            selezioni.remove(seriale)
+        else:
+            selezioni.append(seriale)
+        
+        context.user_data['selezioni_ripristina'] = selezioni
+        
+        # Ricrea la tastiera aggiornata
+        articoli_usati = get_articoli_per_stato('usato')
+        articoli_fuori_uso = get_articoli_per_stato('fuori_uso')
+        articoli = articoli_usati + articoli_fuori_uso
+        
+        keyboard = []
+        articoli.sort(key=lambda x: x[0], reverse=True)
+        for art_seriale, cat, sed in articoli:
+            stato_attuale = "usato" if (art_seriale, cat, sed) in articoli_usati else "fuori uso"
+            nome = f"{art_seriale} - {CATEGORIE[cat]} ({stato_attuale})"
+            if art_seriale in selezioni:
+                nome = f"✅ {nome}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_ripristina_{art_seriale}")])
+        
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_ripristina")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "🔄 Seleziona articoli da ripristinare a DISPONIBILE:\n\n"
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: {len(selezioni)}",
+            reply_markup=reply_markup
+        )
+
+    # CONFERMA RIPRISTINA
+    elif data == "conferma_ripristina":
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono ripristinare articoli!", show_alert=True)
+            return
+            
+        selezioni = context.user_data.get('selezioni_ripristina', [])
+        
+        if not selezioni:
+            await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
+            return
+        
+        # Processa tutti gli articoli selezionati
+        for seriale in selezioni:
+            update_stato(seriale, "disponibile")
+        
+        await query.edit_message_text(f"✅ {len(selezioni)} articoli ripristinati a DISPONIBILE!")
+        
+        # Pulisci i dati temporanei
+        if 'selezioni_ripristina' in context.user_data:
+            del context.user_data['selezioni_ripristina']
 
     # APPROVA UTENTE (UNO ALLA VOLTA)
     elif data.startswith("approva_"):
@@ -1654,8 +1721,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             "📤 Seleziona articoli USATI da spostare in CENTRALE:\n\n"
-            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
-            "📝 Articoli selezionati: {len(selezioni)}",
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: {len(selezioni)}",
             reply_markup=reply_markup
         )
 
@@ -1735,8 +1802,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             "📤 Seleziona articoli FUORI USO da spostare in CENTRALE:\n\n"
-            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
-            "📝 Articoli selezionati: {len(selezioni)}",
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: {len(selezioni)}",
             reply_markup=reply_markup
         )
 
