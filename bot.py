@@ -1110,7 +1110,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("📦 Seleziona categoria:", reply_markup=reply_markup)
 
-    # RIMUOVI (solo admin)
+    # RIMUOVI (solo admin) - MODIFICATO PER SELEZIONE MULTIPLA
     elif text == "➖ Rimuovi" and is_admin(user_id):
         context.user_data['azione'] = 'rimuovi_categoria'
         keyboard = [
@@ -1558,6 +1558,105 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if 'selezioni_ripristina' in context.user_data:
             del context.user_data['selezioni_ripristina']
 
+    # RIMUOVI - SELEZIONE CATEGORIA
+    elif data.startswith("rimuovi_cat_"):
+        categoria = data[12:]
+        articoli = get_articoli_per_stato('disponibile') + get_articoli_per_stato('usato') + get_articoli_per_stato('fuori_uso')
+        articoli_categoria = [a for a in articoli if a[1] == categoria]
+        
+        if not articoli_categoria:
+            await query.edit_message_text(f"❌ Nessun articolo per {CATEGORIE[categoria]}")
+            return
+        
+        # Inizializza la lista delle selezioni
+        context.user_data['selezioni_rimuovi'] = []
+        context.user_data['categoria_corrente_rimuovi'] = categoria
+        
+        keyboard = []
+        # ORDINA PER CODICE (dal basso all'alto)
+        articoli_categoria.sort(key=lambda x: x[0], reverse=True)
+        for seriale, cat, sede in articoli_categoria:
+            nome = f"{seriale} - {SEDI[sede]}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_rimuovi_{seriale}")])
+        
+        # Aggiungi pulsante per conferma selezione
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data=f"conferma_rimuovi_{categoria}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"➖ Seleziona articoli da ELIMINARE ({CATEGORIE[categoria]}):\n\n"
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: 0",
+            reply_markup=reply_markup
+        )
+
+    # SELEZIONE ARTICOLO RIMUOVI (aggiunge/rimuove dalla lista)
+    elif data.startswith("seleziona_rimuovi_"):
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono eliminare articoli!", show_alert=True)
+            return
+            
+        seriale = data[17:]
+        selezioni = context.user_data.get('selezioni_rimuovi', [])
+        
+        if seriale in selezioni:
+            selezioni.remove(seriale)
+        else:
+            selezioni.append(seriale)
+        
+        context.user_data['selezioni_rimuovi'] = selezioni
+        
+        # Ricrea la tastiera aggiornata
+        categoria = context.user_data.get('categoria_corrente_rimuovi', '')
+        articoli = get_articoli_per_stato('disponibile') + get_articoli_per_stato('usato') + get_articoli_per_stato('fuori_uso')
+        articoli_categoria = [a for a in articoli if a[1] == categoria]
+        
+        keyboard = []
+        articoli_categoria.sort(key=lambda x: x[0], reverse=True)
+        for art_seriale, cat, sede in articoli_categoria:
+            nome = f"{art_seriale} - {SEDI[sede]}"
+            if art_seriale in selezioni:
+                nome = f"✅ {nome}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_rimuovi_{art_seriale}")])
+        
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data=f"conferma_rimuovi_{categoria}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"➖ Seleziona articoli da ELIMINARE ({CATEGORIE[categoria]}):\n\n"
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: {len(selezioni)}",
+            reply_markup=reply_markup
+        )
+
+    # CONFERMA RIMUOVI
+    elif data.startswith("conferma_rimuovi_"):
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono eliminare articoli!", show_alert=True)
+            return
+            
+        selezioni = context.user_data.get('selezioni_rimuovi', [])
+        
+        if not selezioni:
+            await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
+            return
+        
+        # Processa tutti gli articoli selezionati
+        success_count = 0
+        for seriale in selezioni:
+            articolo = get_articolo(seriale)
+            if articolo:
+                delete_articolo(seriale)
+                success_count += 1
+        
+        await query.edit_message_text(f"✅ {success_count} articoli eliminati dall'inventario!")
+        
+        # Pulisci i dati temporanei
+        if 'selezioni_rimuovi' in context.user_data:
+            del context.user_data['selezioni_rimuovi']
+        if 'categoria_corrente_rimuovi' in context.user_data:
+            del context.user_data['categoria_corrente_rimuovi']
+
     # APPROVA UTENTE (UNO ALLA VOLTA)
     elif data.startswith("approva_"):
         if not is_admin(user_id):
@@ -1633,37 +1732,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📌 Formato richiesto: **3 cifre** (es. 001, 123, 999)\n\n"
             f"Inserisci le 3 cifre:"
         )
-
-    # RIMOZIONE ARTICOLO - SELEZIONE CATEGORIA
-    elif data.startswith("rimuovi_cat_"):
-        categoria = data[12:]
-        articoli = get_articoli_per_stato('disponibile') + get_articoli_per_stato('usato') + get_articoli_per_stato('fuori_uso')
-        articoli_categoria = [a for a in articoli if a[1] == categoria]
-        
-        if not articoli_categoria:
-            await query.edit_message_text(f"❌ Nessun articolo per {CATEGORIE[categoria]}")
-            return
-        
-        keyboard = []
-        # ORDINA PER CODICE (dal basso all'alto)
-        articoli_categoria.sort(key=lambda x: x[0], reverse=True)
-        for seriale, cat, sede in articoli_categoria:
-            nome = f"{seriale} - {SEDI[sede]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"elimina_{seriale}")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(f"➖ Seleziona articolo da ELIMINARE:", reply_markup=reply_markup)
-
-    # RIMOZIONE ARTICOLO - CONFERMA ELIMINAZIONE
-    elif data.startswith("elimina_"):
-        seriale = data[8:]
-        articolo = get_articolo(seriale)
-        
-        if articolo:
-            delete_articolo(seriale)
-            await query.edit_message_text(f"✅ {seriale} rimosso dall'inventario!")
-        else:
-            await query.edit_message_text(f"❌ {seriale} non trovato!")
 
     # GESTIONE CENTRALE - SPOSTA USATI
     elif data == "centrale_sposta_usati":
