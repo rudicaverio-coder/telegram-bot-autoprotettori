@@ -1733,173 +1733,97 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Inserisci le 3 cifre:"
         )
 
-    # GESTIONE CENTRALE - SPOSTA USATI
+    # === GESTIONE CENTRALE - VERSIONE ITERATIVA ===
+
+    # GESTIONE CENTRALE - SPOSTA USATI (VERSIONE ITERATIVA)
     elif data == "centrale_sposta_usati":
         articoli_usati = get_articoli_per_stato_centrale('usato', escludi_centrale=True)
         if not articoli_usati:
             await query.edit_message_text("❌ Nessun articolo usato da spostare in centrale (o tutti già in centrale)")
             return
 
-        # Inizializza la lista delle selezioni
-        context.user_data['selezioni_centrale_usati'] = []
-        
         keyboard = []
         # ORDINA PER CODICE (dal basso all'alto)
         articoli_usati.sort(key=lambda x: x[0], reverse=True)
         for seriale, cat, sed in articoli_usati:
             nome = f"{seriale} - {SEDI[sed]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_usato_{seriale}")])
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"sposta_usato_centrale_{seriale}")])
         
-        # Aggiungi pulsante per conferma selezione
-        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_usati")])
+        # Aggiungi pulsante per tornare indietro
+        keyboard.append([InlineKeyboardButton("🔙 Torna al Menu Centrale", callback_data="centrale_menu")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "📤 Seleziona articoli USATI da spostare in CENTRALE:\n\n"
-            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
-            "📝 Articoli selezionati: 0",
+            "📤 Seleziona UN articolo USATO da spostare in CENTRALE:\n\n"
+            "🟢 Clicca su un articolo per spostarlo immediatamente in centrale",
             reply_markup=reply_markup
         )
 
-    # SELEZIONE ARTICOLO USATO PER CENTRALE
-    elif data.startswith("seleziona_centrale_usato_"):
-        seriale = data[24:]
-        selezioni = context.user_data.get('selezioni_centrale_usati', [])
+    # SPOSTA SINGOLO ARTICOLO USATO IN CENTRALE
+    elif data.startswith("sposta_usato_centrale_"):
+        seriale = data[22:]
         
-        if seriale in selezioni:
-            selezioni.remove(seriale)
+        if sposta_in_centrale(seriale):
+            await query.edit_message_text(f"✅ {seriale} spostato in CENTRALE!")
         else:
-            selezioni.append(seriale)
-        
-        context.user_data['selezioni_centrale_usati'] = selezioni
-        
-        # Ricrea la tastiera aggiornata con le spunte
-        articoli_usati = get_articoli_per_stato_centrale('usato', escludi_centrale=True)
-        
-        keyboard = []
-        # ORDINA PER CODICE (dal basso all'alto)
-        articoli_usati.sort(key=lambda x: x[0], reverse=True)
-        for art_seriale, cat, sed in articoli_usati:
-            nome = f"{art_seriale} - {SEDI[sed]}"
-            # AGGIUNGI LA SPUNTA SE SELEZIONATO
-            if art_seriale in selezioni:
-                nome = f"✅ {nome}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_usato_{art_seriale}")])
-        
-        # Aggiungi pulsante per conferma selezione
-        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_usati")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            "📤 Seleziona articoli USATI da spostare in CENTRALE:\n\n"
-            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
-            f"📝 Articoli selezionati: {len(selezioni)}",
-            reply_markup=reply_markup
-        )
+            await query.edit_message_text(f"❌ Errore nello spostamento di {seriale}")
 
-    # CONFERMA SPOSTAMENTO USATI IN CENTRALE
-    elif data == "conferma_centrale_usati":
-        selezioni = context.user_data.get('selezioni_centrale_usati', [])
-        
-        if not selezioni:
-            await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
-            return
-        
-        # Processa tutti gli articoli selezionati
-        success_count = 0
-        for seriale in selezioni:
-            if sposta_in_centrale(seriale):
-                success_count += 1
-        
-        await query.edit_message_text(f"✅ {success_count} articoli usati spostati in CENTRALE!")
-        
-        # Pulisci i dati temporanei
-        if 'selezioni_centrale_usati' in context.user_data:
-            del context.user_data['selezioni_centrale_usati']
-
-    # GESTIONE CENTRALE - SPOSTA FUORI USO
+    # GESTIONE CENTRALE - SPOSTA FUORI USO (VERSIONE ITERATIVA)
     elif data == "centrale_sposta_fuori_uso":
         articoli_fuori_uso = get_articoli_per_stato_centrale('fuori_uso', escludi_centrale=True)
         if not articoli_fuori_uso:
             await query.edit_message_text("❌ Nessun articolo fuori uso da spostare in centrale (o tutti già in centrale)")
             return
 
-        # Inizializza la lista delle selezioni
-        context.user_data['selezioni_centrale_fuori_uso'] = []
-        
         keyboard = []
         # ORDINA PER CODICE (dal basso all'alto)
         articoli_fuori_uso.sort(key=lambda x: x[0], reverse=True)
         for seriale, cat, sed in articoli_fuori_uso:
             nome = f"{seriale} - {SEDI[sed]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_fuori_uso_{seriale}")])
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"sposta_fuori_uso_centrale_{seriale}")])
         
-        # Aggiungi pulsante per conferma selezione
-        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_fuori_uso")])
+        # Aggiungi pulsante per tornare indietro
+        keyboard.append([InlineKeyboardButton("🔙 Torna al Menu Centrale", callback_data="centrale_menu")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "📤 Seleziona articoli FUORI USO da spostare in CENTRALE:\n\n"
-            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
-            "📝 Articoli selezionati: 0",
+            "📤 Seleziona UN articolo FUORI USO da spostare in CENTRALE:\n\n"
+            "🟢 Clicca su un articolo per spostarlo immediatamente in centrale",
             reply_markup=reply_markup
         )
 
-    # SELEZIONE ARTICOLO FUORI USO PER CENTRALE
-    elif data.startswith("seleziona_centrale_fuori_uso_"):
-        seriale = data[28:]
-        selezioni = context.user_data.get('selezioni_centrale_fuori_uso', [])
+    # SPOSTA SINGOLO ARTICOLO FUORI USO IN CENTRALE
+    elif data.startswith("sposta_fuori_uso_centrale_"):
+        seriale = data[26:]
         
-        if seriale in selezioni:
-            selezioni.remove(seriale)
+        if sposta_in_centrale(seriale):
+            await query.edit_message_text(f"✅ {seriale} spostato in CENTRALE!")
         else:
-            selezioni.append(seriale)
+            await query.edit_message_text(f"❌ Errore nello spostamento di {seriale}")
+
+    # TORNA AL MENU CENTRALE
+    elif data == "centrale_menu":
+        # Mostra il menu principale per la gestione centrale
+        keyboard = [
+            [InlineKeyboardButton("📤 Sposta Usati in Centrale", callback_data="centrale_sposta_usati")],
+            [InlineKeyboardButton("📤 Sposta Fuori Uso in Centrale", callback_data="centrale_sposta_fuori_uso")],
+            [InlineKeyboardButton("📋 Inventario Centrale", callback_data="centrale_inventario")],
+        ]
         
-        context.user_data['selezioni_centrale_fuori_uso'] = selezioni
-        
-        # Ricrea la tastiera aggiornata con le spunte
-        articoli_fuori_uso = get_articoli_per_stato_centrale('fuori_uso', escludi_centrale=True)
-        
-        keyboard = []
-        # ORDINA PER CODICE (dal basso all'alto)
-        articoli_fuori_uso.sort(key=lambda x: x[0], reverse=True)
-        for art_seriale, cat, sed in articoli_fuori_uso:
-            nome = f"{art_seriale} - {SEDI[sed]}"
-            # AGGIUNGI LA SPUNTA SE SELEZIONATO
-            if art_seriale in selezioni:
-                nome = f"✅ {nome}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_fuori_uso_{art_seriale}")])
-        
-        # Aggiungi pulsante per conferma selezione
-        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_fuori_uso")])
+        # Conta gli articoli in centrale per il riassunto
+        articoli_centrale = get_articoli_in_centrale()
+        usati_centrale = len([a for a in articoli_centrale if a[3] == 'usato_centrale'])
+        fuori_uso_centrale = len([a for a in articoli_centrale if a[3] == 'fuori_uso_centrale'])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            "📤 Seleziona articoli FUORI USO da spostare in CENTRALE:\n\n"
-            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
-            f"📝 Articoli selezionati: {len(selezioni)}",
-            reply_markup=reply_markup
-        )
-
-    # CONFERMA SPOSTAMENTO FUORI USO IN CENTRALE
-    elif data == "conferma_centrale_fuori_uso":
-        selezioni = context.user_data.get('selezioni_centrale_fuori_uso', [])
+        messaggio = f"🏢 **GESTIONE ARTICOLI IN CENTRALE**\n\n"
+        messaggio += f"📊 **Attualmente in centrale:**\n"
+        messaggio += f"• 🔴 Usati: {usati_centrale}\n"
+        messaggio += f"• ⚫ Fuori uso: {fuori_uso_centrale}\n"
+        messaggio += f"• 📦 Totale: {len(articoli_centrale)}\n\n"
+        messaggio += "Seleziona un'operazione:"
         
-        if not selezioni:
-            await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
-            return
-        
-        # Processa tutti gli articoli selezionati
-        success_count = 0
-        for seriale in selezioni:
-            if sposta_in_centrale(seriale):
-                success_count += 1
-        
-        await query.edit_message_text(f"✅ {success_count} articoli fuori uso spostati in CENTRALE!")
-        
-        # Pulisci i dati temporanei
-        if 'selezioni_centrale_fuori_uso' in context.user_data:
-            del context.user_data['selezioni_centrale_fuori_uso']
+        await query.edit_message_text(messaggio, reply_markup=reply_markup)
 
     # GESTIONE CENTRALE - INVENTARIO
     elif data == "centrale_inventario":
