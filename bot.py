@@ -729,7 +729,7 @@ def ricostruisci_database_da_inventario(testo_inventario):
 # === NUOVE FUNZIONI PER SELEZIONE MULTIPLA ===
 async def mostra_selezione_multipla(update, context, tipo_selezione, articoli, titolo, callback_base):
     """Mostra la selezione multipla degli articoli"""
-    query = update.callback_query
+    query = update.callback_query if hasattr(update, 'callback_query') else None
     
     # Inizializza la lista delle selezioni se non esiste
     if f'selezioni_{tipo_selezione}' not in context.user_data:
@@ -742,7 +742,7 @@ async def mostra_selezione_multipla(update, context, tipo_selezione, articoli, t
     keyboard = []
     
     for articolo in articoli:
-        seriale, categoria, sede = articolo
+        seriale, categoria, sede = articolo[:3]  # Prende solo i primi 3 elementi
         is_selected = seriale in context.user_data[f'selezioni_{tipo_selezione}']
         
         emoji = "✅" if is_selected else "⚪"
@@ -779,9 +779,15 @@ async def mostra_selezione_multipla(update, context, tipo_selezione, articoli, t
     messaggio += "\nPremi ➡️ CONFERMA quando hai finito"
     
     try:
-        await query.edit_message_text(messaggio, reply_markup=reply_markup)
+        if query:
+            await query.edit_message_text(messaggio, reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(messaggio, reply_markup=reply_markup)
     except Exception as e:
-        await query.message.reply_text(messaggio, reply_markup=reply_markup)
+        if query:
+            await query.message.reply_text(messaggio, reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(messaggio, reply_markup=reply_markup)
 
 async def gestisci_selezione_multipla(update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
     """Gestisce la selezione/deselezione degli articoli"""
@@ -793,6 +799,10 @@ async def gestisci_selezione_multipla(update: Update, context: ContextTypes.DEFA
         if len(parts) >= 3:
             tipo_selezione = parts[1]
             seriale = '_'.join(parts[2:])
+            
+            # Inizializza se non esiste
+            if f'selezioni_{tipo_selezione}' not in context.user_data:
+                context.user_data[f'selezioni_{tipo_selezione}'] = []
             
             # Toggle della selezione
             if seriale in context.user_data[f'selezioni_{tipo_selezione}']:
@@ -809,6 +819,10 @@ async def gestisci_selezione_multipla(update: Update, context: ContextTypes.DEFA
         tipo_selezione = callback_data.replace("seleziona_tutti_", "")
         articoli = context.user_data.get(f'articoli_{tipo_selezione}', [])
         
+        # Inizializza se non esiste
+        if f'selezioni_{tipo_selezione}' not in context.user_data:
+            context.user_data[f'selezioni_{tipo_selezione}'] = []
+        
         # Seleziona tutti gli articoli disponibili
         context.user_data[f'selezioni_{tipo_selezione}'] = [articolo[0] for articolo in articoli]
         
@@ -817,11 +831,11 @@ async def gestisci_selezione_multipla(update: Update, context: ContextTypes.DEFA
     
     elif callback_data.startswith("deseleziona_tutti_"):
         tipo_selezione = callback_data.replace("deseleziona_tutti_", "")
-        articoli = context.user_data.get(f'articoli_{tipo_selezione}', [])
         
         # Deseleziona tutti
         context.user_data[f'selezioni_{tipo_selezione}'] = []
         
+        articoli = context.user_data.get(f'articoli_{tipo_selezione}', [])
         titolo = get_titolo_selezione(tipo_selezione)
         await mostra_selezione_multipla(update, context, tipo_selezione, articoli, titolo, f"toggle_{tipo_selezione}")
     
@@ -837,16 +851,23 @@ def get_titolo_selezione(tipo_selezione):
     """Restituisce il titolo appropriato per il tipo di selezione"""
     titoli = {
         "usato": "🔴 Seleziona articoli da segnare come USATO",
-        "fuori_uso": "⚫ Seleziona articoli da segnare come FUORI USO", 
+        "fuoriuso": "⚫ Seleziona articoli da segnare come FUORI USO", 
         "ripristina": "🔄 Seleziona articoli da RIPRISTINARE a DISPONIBILE",
-        "rimuovi": "➖ Seleziona articoli da ELIMINARE"
+        "rimuovi": "➖ Seleziona articoli da ELIMINARE",
+        "centraleusati": "📤 Seleziona USATI da spostare in CENTRALE",
+        "centralefuoriuso": "📤 Seleziona FUORI USO da spostare in CENTRALE"
     }
     return titoli.get(tipo_selezione, "Seleziona articoli")
 
 async def conferma_selezione(update: Update, context: ContextTypes.DEFAULT_TYPE, tipo_selezione):
     """Conferma la selezione ed esegue l'azione appropriata"""
     query = update.callback_query
-    selezioni = context.user_data.get(f'selezioni_{tipo_selezione}', [])
+    
+    # Inizializza se non esiste
+    if f'selezioni_{tipo_selezione}' not in context.user_data:
+        context.user_data[f'selezioni_{tipo_selezione}'] = []
+        
+    selezioni = context.user_data[f'selezioni_{tipo_selezione}']
     
     if not selezioni:
         await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
@@ -862,7 +883,7 @@ async def conferma_selezione(update: Update, context: ContextTypes.DEFAULT_TYPE,
             success_count += 1
         messaggio = f"✅ {success_count} articoli segnati come USATI!"
     
-    elif tipo_selezione == "fuori_uso":
+    elif tipo_selezione == "fuoriuso":
         for seriale in selezioni:
             update_stato(seriale, "fuori_uso")
             success_count += 1
@@ -881,6 +902,18 @@ async def conferma_selezione(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 delete_articolo(seriale)
                 success_count += 1
         messaggio = f"✅ {success_count} articoli eliminati dall'inventario!"
+    
+    elif tipo_selezione == "centraleusati":
+        for seriale in selezioni:
+            if sposta_in_centrale(seriale):
+                success_count += 1
+        messaggio = f"✅ {success_count} articoli USATI spostati in CENTRALE!"
+    
+    elif tipo_selezione == "centralefuoriuso":
+        for seriale in selezioni:
+            if sposta_in_centrale(seriale):
+                success_count += 1
+        messaggio = f"✅ {success_count} articoli FUORI USO spostati in CENTRALE!"
     
     # Pulisci i dati temporanei
     for key in [f'selezioni_{tipo_selezione}', f'articoli_{tipo_selezione}']:
@@ -1156,7 +1189,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(msg)
 
-    # FUORI USO
+    # FUORI USO - CORRETTO CON SELEZIONE MULTIPLA
     elif text == "⚫ Fuori Uso":
         if not is_admin(user_id):
             articoli_fuori_uso = get_articoli_per_stato('fuori_uso')
@@ -1181,20 +1214,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(msg)
             return
 
-        categorie_con_articoli = get_categorie_con_articoli('disponibile') + get_categorie_con_articoli('usato')
-        categorie_con_articoli = list(set(categorie_con_articoli))
-        
-        if not categorie_con_articoli:
+        # Per admin: CREARE FUORI USO - usa selezione multipla
+        articoli_disponibili = get_articoli_per_stato('disponibile')
+        articoli_usati = get_articoli_per_stato('usato')
+        articoli = articoli_disponibili + articoli_usati
+
+        if not articoli:
             await update.message.reply_text("⚫ Nessun articolo da segnare come fuori uso")
             return
 
-        keyboard = []
-        for categoria in categorie_con_articoli:
-            if categoria in CATEGORIE:
-                keyboard.append([InlineKeyboardButton(CATEGORIE[categoria], callback_data=f"crea_fuori_uso_cat_{categoria}")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("⚫ Seleziona categoria per SEGNARE come FUORI USO:", reply_markup=reply_markup)
+        # Usa la nuova funzione di selezione multipla
+        await mostra_selezione_multipla(
+            update, 
+            context, 
+            "fuoriuso", 
+            articoli, 
+            "⚫ Seleziona articoli da segnare come FUORI USO", 
+            "toggle_fuoriuso"
+        )
 
     # AGGIUNGI (solo admin)
     elif text == "➕ Aggiungi" and is_admin(user_id):
@@ -1284,7 +1321,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "🆘 Help":
         await help_command(update, context)
 
-    # IN CENTRALE
+    # IN CENTRALE - CON SELEZIONE MULTIPLA
     elif text == "📍 In Centrale":
         if not is_user_approved(user_id):
             await update.message.reply_text("❌ Accesso non autorizzato")
@@ -1425,10 +1462,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await mostra_selezione_multipla(
             update, 
             context, 
-            "fuori_uso", 
+            "fuoriuso", 
             articoli_categoria, 
             f"⚫ Seleziona {CATEGORIE[categoria]} da segnare come FUORI USO", 
-            "toggle_fuori_uso"
+            "toggle_fuoriuso"
         )
 
     # RIMUOVI - SELEZIONE CATEGORIA
@@ -1453,6 +1490,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             articoli_categoria, 
             f"➖ Seleziona articoli da ELIMINARE ({CATEGORIE[categoria]})", 
             "toggle_rimuovi"
+        )
+
+    # GESTIONE CENTRALE - SPOSTA USATI (CON SELEZIONE MULTIPLA)
+    elif data == "centrale_sposta_usati":
+        articoli_usati = get_articoli_per_stato_centrale('usato', escludi_centrale=True)
+        if not articoli_usati:
+            await query.edit_message_text("❌ Nessun articolo usato da spostare in centrale (o tutti già in centrale)")
+            return
+
+        # Usa la nuova funzione di selezione multipla
+        await mostra_selezione_multipla(
+            update, 
+            context, 
+            "centraleusati", 
+            articoli_usati, 
+            "📤 Seleziona USATI da spostare in CENTRALE", 
+            "toggle_centraleusati"
+        )
+
+    # GESTIONE CENTRALE - SPOSTA FUORI USO (CON SELEZIONE MULTIPLA)
+    elif data == "centrale_sposta_fuori_uso":
+        articoli_fuori_uso = get_articoli_per_stato_centrale('fuori_uso', escludi_centrale=True)
+        if not articoli_fuori_uso:
+            await query.edit_message_text("❌ Nessun articolo fuori uso da spostare in centrale (o tutti già in centrale)")
+            return
+
+        # Usa la nuova funzione di selezione multipla
+        await mostra_selezione_multipla(
+            update, 
+            context, 
+            "centralefuoriuso", 
+            articoli_fuori_uso, 
+            "📤 Seleziona FUORI USO da spostare in CENTRALE", 
+            "toggle_centralefuoriuso"
         )
 
     # GESTIONE SELEZIONI MULTIPLE
@@ -1532,68 +1603,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📌 Formato richiesto: **3 cifre** (es. 001, 123, 999)\n\n"
             f"Inserisci le 3 cifre:"
         )
-
-    # GESTIONE CENTRALE - SPOSTA USATI
-    elif data == "centrale_sposta_usati":
-        articoli_usati = get_articoli_per_stato_centrale('usato', escludi_centrale=True)
-        if not articoli_usati:
-            await query.edit_message_text("❌ Nessun articolo usato da spostare in centrale (o tutti già in centrale)")
-            return
-
-        keyboard = []
-        articoli_usati.sort(key=lambda x: x[0], reverse=True)
-        for seriale, cat, sed in articoli_usati:
-            nome = f"{seriale} - {SEDI[sed]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"sposta_usato_centrale_{seriale}")])
-        
-        keyboard.append([InlineKeyboardButton("🔙 Torna al Menu Centrale", callback_data="centrale_menu")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            "📤 Seleziona UN articolo USATO da spostare in CENTRALE:\n\n"
-            "🟢 Clicca su un articolo per spostarlo immediatamente in centrale",
-            reply_markup=reply_markup
-        )
-
-    # SPOSTA SINGOLO ARTICOLO USATO IN CENTRALE
-    elif data.startswith("sposta_usato_centrale_"):
-        seriale = data[22:]
-        
-        if sposta_in_centrale(seriale):
-            await query.edit_message_text(f"✅ {seriale} spostato in CENTRALE!")
-        else:
-            await query.edit_message_text(f"❌ Errore nello spostamento di {seriale}")
-
-    # GESTIONE CENTRALE - SPOSTA FUORI USO
-    elif data == "centrale_sposta_fuori_uso":
-        articoli_fuori_uso = get_articoli_per_stato_centrale('fuori_uso', escludi_centrale=True)
-        if not articoli_fuori_uso:
-            await query.edit_message_text("❌ Nessun articolo fuori uso da spostare in centrale (o tutti già in centrale)")
-            return
-
-        keyboard = []
-        articoli_fuori_uso.sort(key=lambda x: x[0], reverse=True)
-        for seriale, cat, sed in articoli_fuori_uso:
-            nome = f"{seriale} - {SEDI[sed]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"sposta_fuori_uso_centrale_{seriale}")])
-        
-        keyboard.append([InlineKeyboardButton("🔙 Torna al Menu Centrale", callback_data="centrale_menu")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            "📤 Seleziona UN articolo FUORI USO da spostare in CENTRALE:\n\n"
-            "🟢 Clicca su un articolo per spostarlo immediatamente in centrale",
-            reply_markup=reply_markup
-        )
-
-    # SPOSTA SINGOLO ARTICOLO FUORI USO IN CENTRALE
-    elif data.startswith("sposta_fuori_uso_centrale_"):
-        seriale = data[26:]
-        
-        if sposta_in_centrale(seriale):
-            await query.edit_message_text(f"✅ {seriale} spostato in CENTRALE!")
-        else:
-            await query.edit_message_text(f"❌ Errore nello spostamento di {seriale}")
 
     # TORNA AL MENU CENTRALE
     elif data == "centrale_menu":
@@ -1785,7 +1794,8 @@ def main():
     print("💾 Backup automatici ogni 25 minuti - Dati al sicuro! 🛡️")
     print("🏠 Nuova categoria: Seconda Utenza aggiunta!")
     print("📤 Nuova feature: Ricostruzione database da inventario!")
-    print("🔄 Nuovo sistema: Selezione multipla con spunte!")
+    print("🔄 Nuovo sistema: Selezione multipla con spunte per tutti i flussi!")
+    print("🏢 Gestione centrale: Selezione multipla per spostamento articoli!")
     
     application.run_polling()
 
