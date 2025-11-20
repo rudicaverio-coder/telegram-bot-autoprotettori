@@ -14,26 +14,26 @@ import base64
 import json
 
 # === CONFIGURAZIONE ===
-DATABASE_NAME = 'autoprotettori_v3.db'
+DATABASE_NAME = 'autoprotettori_v3.db'  # ⬅️ COSTANTE UNICA PER TUTTO IL DATABASE
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_IDS = [1816045269, 653425963, 693843502, 6622015744]
 
 # Configurazione backup GitHub
-GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
-GIST_ID = os.environ.get('GIST_ID')
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')  # Token GitHub personale
+GIST_ID = os.environ.get('GIST_ID')  # ID del Gist (opzionale - verrà creato automaticamente)
 
-# SOGLIE BOMBOLE
+# SOGLIE BOMBOLE (ORA SONO COMBINATE ERBA + CENTRALE)
 SOGLIE_BOMBOLE = {
-    "sotto_scorta": 7,
-    "allarme_scorta": 8,  
-    "preallarme": 10
+    "sotto_scorta": 7,      # <8 (TOTALE Erba + Centrale)
+    "allarme_scorta": 8,    # =8 (TOTALE Erba + Centrale)  
+    "preallarme": 10        # =10 (TOTALE Erba + Centrale)
 }
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # === DATABASE ===
 def init_db():
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
 
     c.execute('''CREATE TABLE IF NOT EXISTS articoli
@@ -62,13 +62,62 @@ def init_db():
 
 init_db()
 
+# === SISTEMA DI EMERGENZA PER RICREARE TABELLE ===
+def emergency_recreate_database():
+    """Ricrea le tabelle se non esistono - sistema di emergenza"""
+    conn = sqlite3.connect(DATABASE_NAME)
+    c = conn.cursor()
+    
+    try:
+        # Verifica se le tabelle esistono
+        c.execute("SELECT 1 FROM articoli LIMIT 1")
+        c.execute("SELECT 1 FROM utenti LIMIT 1")
+        print("✅ Tabelle database verificate")
+    except sqlite3.OperationalError:
+        print("🚨 TABELLE NON TROVATE! Ricreo il database di emergenza...")
+        init_db()  # Richiama init_db per ricreare tutto
+        print("✅ Database ricreato con successo!")
+    
+    conn.close()
+
+# === VERIFICA INTEGRITÀ DATABASE ===
+def check_database_integrity():
+    """Verifica che il database sia integro e funzionante"""
+    try:
+        conn = sqlite3.connect(DATABASE_NAME)
+        c = conn.cursor()
+        
+        # Verifica se le tabelle esistono e hanno dati
+        c.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('articoli', 'utenti')")
+        table_count = c.fetchone()[0]
+        
+        if table_count < 2:
+            print("🚨 Database corrotto - tabelle mancanti!")
+            conn.close()
+            return False
+            
+        # Verifica alcuni dati
+        c.execute("SELECT COUNT(*) FROM articoli")
+        articoli_count = c.fetchone()[0]
+        
+        c.execute("SELECT COUNT(*) FROM utenti WHERE ruolo = 'admin'")
+        admin_count = c.fetchone()[0]
+        
+        print(f"✅ Database integro - Tabelle: {table_count}, Articoli: {articoli_count}, Admin: {admin_count}")
+        conn.close()
+        return True
+        
+    except Exception as e:
+        print(f"🚨 Errore verifica database: {e}")
+        return False
+
 # === CATEGORIE E SEDI ===
 CATEGORIE = {
     "bombola": "⚗️ Bombola",
     "maschera": "🎭 Maschera",
     "erogatore": "💨 Erogatore", 
     "spallaccio": "🎽 Spallaccio",
-    "seconda_utenza": "🏠 Seconda Utenza"
+    "seconda_utenza": "🏠 Seconda Utenza"  # NUOVA CATEGORIA
 }
 
 SEDI = {
@@ -76,11 +125,18 @@ SEDI = {
     "centrale": "🏢 Centrale"
 }
 
-ORDINE_CATEGORIE = ["bombola", "maschera", "erogatore", "spallaccio", "seconda_utenza"]
+# Nuovo stato per gli articoli in centrale
+STATI_CENTRALE = {
+    "usato_centrale": "🔴 Usato (Centrale)",
+    "fuori_uso_centrale": "⚫ Fuori Uso (Centrale)"
+}
+
+# ORDINE DELLE CATEGORIE PER L'INVENTARIO
+ORDINE_CATEGORIE = ["bombola", "maschera", "erogatore", "spallaccio", "seconda_utenza"]  # AGGIUNTA
 
 # === FUNZIONI UTILITY ===
 def is_admin(user_id):
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("SELECT ruolo FROM utenti WHERE user_id = ?", (user_id,))
     result = c.fetchone()
@@ -88,7 +144,7 @@ def is_admin(user_id):
     return result and result[0] == 'admin'
 
 def is_user_approved(user_id):
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("SELECT ruolo FROM utenti WHERE user_id = ? AND ruolo IN ('admin', 'user')", (user_id,))
     result = c.fetchone()
@@ -96,7 +152,7 @@ def is_user_approved(user_id):
     return result is not None
 
 def get_richieste_in_attesa():
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute('''SELECT user_id, username, nome, data_richiesta 
                  FROM utenti WHERE ruolo = 'in_attesa' ORDER BY data_richiesta''')
@@ -105,7 +161,7 @@ def get_richieste_in_attesa():
     return result
 
 def approva_utente(user_id):
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute('''UPDATE utenti SET ruolo = 'user', data_approvazione = CURRENT_TIMESTAMP 
                  WHERE user_id = ?''', (user_id,))
@@ -115,9 +171,10 @@ def approva_utente(user_id):
 # === FUNZIONI GESTIONE CENTRALE ===
 def sposta_in_centrale(seriale):
     """Sposta un articolo in centrale mantenendo lo stato originale"""
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     
+    # Prima ottieni lo stato attuale
     c.execute("SELECT stato FROM articoli WHERE seriale = ?", (seriale,))
     risultato = c.fetchone()
     
@@ -131,7 +188,36 @@ def sposta_in_centrale(seriale):
             nuovo_stato = "fuori_uso_centrale"
         else:
             conn.close()
-            return False
+            return False  # Non si può spostare in centrale se non è usato o fuori uso
+        
+        c.execute("UPDATE articoli SET stato = ? WHERE seriale = ?", (nuovo_stato, seriale))
+        conn.commit()
+        conn.close()
+        return True
+    
+    conn.close()
+    return False
+
+def ripristina_da_centrale(seriale):
+    """Ripristina un articolo da centrale a Erba"""
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
+    c = conn.cursor()
+    
+    # Prima ottieni lo stato attuale
+    c.execute("SELECT stato FROM articoli WHERE seriale = ?", (seriale,))
+    risultato = c.fetchone()
+    
+    if risultato:
+        stato_attuale = risultato[0]
+        nuovo_stato = ""
+        
+        if stato_attuale == "usato_centrale":
+            nuovo_stato = "usato"
+        elif stato_attuale == "fuori_uso_centrale":
+            nuovo_stato = "fuori_uso"
+        else:
+            conn.close()
+            return False  # Non è in centrale
         
         c.execute("UPDATE articoli SET stato = ? WHERE seriale = ?", (nuovo_stato, seriale))
         conn.commit()
@@ -143,7 +229,7 @@ def sposta_in_centrale(seriale):
 
 def get_articoli_in_centrale():
     """Restituisce tutti gli articoli attualmente in centrale"""
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("SELECT seriale, categoria, sede, stato FROM articoli WHERE stato IN ('usato_centrale', 'fuori_uso_centrale')")
     result = c.fetchall()
@@ -156,6 +242,7 @@ def get_articoli_per_stato_centrale(stato, escludi_centrale=True):
     c = conn.cursor()
     
     if escludi_centrale:
+        # Esclude gli articoli già in centrale
         if stato == 'usato':
             c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato = ? AND stato != 'usato_centrale'", (stato,))
         elif stato == 'fuori_uso':
@@ -169,19 +256,287 @@ def get_articoli_per_stato_centrale(stato, escludi_centrale=True):
     conn.close()
     return result
 
+# === SISTEMA BACKUP AUTOMATICO SU GITHUB ===
+def backup_database_to_gist():
+    """Salva il database su GitHub Gist"""
+    if not GITHUB_TOKEN:
+        print("❌ Token GitHub non configurato - backup disabilitato")
+        return False
+    
+    try:
+        # Leggi il database CORRETTO
+        with open(DATABASE_NAME, 'rb') as f:  # ⬅️ USA LA COSTANTE
+            db_content = f.read()
+        
+        # Converti in base64 per Gist
+        db_base64 = base64.b64encode(db_content).decode('utf-8')
+        
+        # Prepara i dati per Gist
+        files = {
+            'autoprotettori_backup.json': {
+                'content': json.dumps({
+                    'timestamp': datetime.now().isoformat(),
+                    'database_size': len(db_content),
+                    'database_base64': db_base64,
+                    'backup_type': 'automatic'
+                })
+            }
+        }
+        
+        headers = {
+            'Authorization': f'token {GITHUB_TOKEN}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        # Se abbiamo un GIST_ID, aggiornalo, altrimenti creane uno nuovo
+        if GIST_ID:
+            url = f'https://api.github.com/gists/{GIST_ID}'
+            data = {'files': files}
+            response = requests.patch(url, headers=headers, json=data)
+        else:
+            url = 'https://api.github.com/gists'
+            data = {
+                'description': f'Backup Autoprotettori Bot - {datetime.now().strftime("%Y-%m-%d %H:%M")}',
+                'public': False,
+                'files': files
+            }
+            response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code in [200, 201]:
+            result = response.json()
+            print(f"✅ Backup su Gist completato: {result['html_url']}")
+            
+            # Salva il GIST_ID per futuri aggiornamenti
+            if not GIST_ID:
+                with open('gist_id.txt', 'w') as f:
+                    f.write(result['id'])
+                print(f"📝 Nuovo Gist ID salvato: {result['id']}")
+            
+            return True
+        else:
+            print(f"❌ Errore backup Gist: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Errore durante backup: {str(e)}")
+        return False
+
+def restore_database_from_gist():
+    """Ripristina il database da GitHub Gist"""
+    if not GITHUB_TOKEN or not GIST_ID:
+        print("❌ Token o Gist ID non configurati - restore disabilitato")
+        return False
+    
+    try:
+        headers = {
+            'Authorization': f'token {GITHUB_TOKEN}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        url = f'https://api.github.com/gists/{GIST_ID}'
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            gist_data = response.json()
+            backup_file = gist_data['files'].get('autoprotettori_backup.json')
+            
+            if backup_file:
+                backup_content = json.loads(backup_file['content'])
+                db_base64 = backup_content['database_base64']
+                timestamp = backup_content['timestamp']
+                
+                # Decodifica e salva il database
+                db_content = base64.b64decode(db_base64)
+                with open(DATABASE_NAME, 'wb') as f:  # ⬅️ USA LA COSTANTE
+                    f.write(db_content)
+                
+                print(f"✅ Database ripristinato da backup: {timestamp}")
+                return True
+            else:
+                print("❌ File di backup non trovato nel Gist")
+                return False
+        else:
+            print(f"❌ Errore recupero Gist: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Errore durante restore: {str(e)}")
+        return False
+
+def restore_on_startup():
+    """Tenta il ripristino del database all'avvio"""
+    if not GITHUB_TOKEN or not GIST_ID:
+        print("❌ Token o Gist ID non configurati - restore disabilitato")
+        return False
+    
+    print("🔄 Tentativo di ripristino database da backup...")
+    if restore_database_from_gist():
+        print("✅ Database ripristinato dal backup GitHub!")
+        return True
+    else:
+        print("❌ Ripristino fallito, si parte con database nuovo")
+        # Ricrea almeno gli admin
+        init_db()
+        return False
+
+# === BACKUP AUTOMATICO OGNI 25 MINUTI ===
+def backup_scheduler():
+    """Scheduler per backup automatici migliorato"""
+    print("🔄 Scheduler backup avviato (ogni 25 minuti)")
+    
+    # Backup immediato all'avvio
+    time.sleep(10)
+    print("🔄 Backup iniziale in corso...")
+    backup_database_to_gist()
+    
+    # Backup ogni 25 minuti per sicurezza
+    while True:
+        time.sleep(1500)  # 25 minuti invece di 30 per sicurezza
+        print("🔄 Backup automatico in corso...")
+        if backup_database_to_gist():
+            print("✅ Backup completato con successo")
+        else:
+            print("❌ Backup fallito, riprovo al prossimo ciclo")
+
+# === SISTEMA KEEP-ALIVE ULTRA-AGGRESSIVO ===
+def keep_alive_aggressive():
+    """Keep-alive ultra-aggressivo per evitare spin-down"""
+    urls = [
+        "https://telegram-bot-autoprotettori.onrender.com/health",
+        "https://telegram-bot-autoprotettori.onrender.com/", 
+        "https://telegram-bot-autoprotettori.onrender.com/ping",
+        "https://telegram-bot-autoprotettori.onrender.com/status",
+        "https://telegram-bot-autoprotettori.onrender.com/keep-alive"
+    ]
+    
+    print("🔄 Sistema keep-alive ULTRA-AGGRESSIVO avviato! Ping ogni 5 minuti...")
+    
+    while True:
+        success_count = 0
+        for url in urls:
+            try:
+                response = requests.get(url, timeout=15)
+                if response.status_code == 200:
+                    print(f"✅ Ping riuscito - {datetime.now().strftime('%H:%M:%S')} - {url}")
+                    success_count += 1
+                else:
+                    print(f"⚠️  Ping {url} - Status: {response.status_code}")
+            except Exception as e:
+                print(f"❌ Errore ping {url}: {e}")
+        
+        print(f"📊 Ping completati: {success_count}/{len(urls)} successi")
+        
+        if success_count == 0:
+            print("🚨 CRITICO: Tutti i ping falliti! Riavvio in 30 secondi...")
+            time.sleep(30)
+            # Forza il riavvio
+            os._exit(1)
+        
+        # Aspetta solo 5 minuti (300 secondi) - molto meno di 15 minuti!
+        time.sleep(300)
+
+# === FUNZIONI SERVER STATUS ===
+def get_render_usage_simple():
+    """
+    Versione semplificata che stima l'uso basandosi sul tempo di attività
+    e mostra informazioni sul consumo mensile
+    """
+    try:
+        # Calcola giorni nel mese corrente
+        today = datetime.now()
+        first_day_next_month = datetime(today.year, today.month % 12 + 1, 1)
+        last_day_current_month = first_day_next_month - timedelta(days=1)
+        days_in_month = last_day_current_month.day
+        days_passed = today.day
+        days_remaining = days_in_month - days_passed
+        
+        # Stima ore usate basandosi sui giorni passati
+        # Assumendo che il bot sia sempre attivo (24/7)
+        hours_in_day = 24
+        estimated_hours_used = days_passed * hours_in_day
+        monthly_limit = 750  # Ore incluse nel piano di Render
+        
+        # Calcola proiezione mensile
+        projected_monthly_usage = (estimated_hours_used / days_passed) * days_in_month
+        hours_remaining = monthly_limit - projected_monthly_usage
+        
+        # Calcola percentuali
+        usage_percentage = (estimated_hours_used / monthly_limit) * 100
+        projected_percentage = (projected_monthly_usage / monthly_limit) * 100
+        
+        status_msg = "🖥️ **STATUS SERVER RENDER**\n\n"
+        status_msg += f"📅 **MESE CORRENTE:** {today.strftime('%B %Y')}\n"
+        status_msg += f"• Giorni passati: {days_passed}/{days_in_month}\n"
+        status_msg += f"• Giorni rimanenti: {days_remaining}\n\n"
+        
+        status_msg += "⏰ **CONSUMO ORE (STIMA):**\n"
+        status_msg += f"• Ore stimate usate: {estimated_hours_used:.1f}h\n"
+        status_msg += f"• Proiezione mensile: {projected_monthly_usage:.1f}h/750h\n"
+        status_msg += f"• Ore stimate rimanenti: {hours_remaining:.1f}h\n\n"
+        
+        status_msg += "📊 **PERCENTUALI:**\n"
+        status_msg += f"• Consumo attuale: {usage_percentage:.1f}%\n"
+        status_msg += f"• Proiezione finale: {projected_percentage:.1f}%\n\n"
+        
+        # Aggiungi avvisi se il consumo è alto
+        if projected_percentage > 80:
+            status_msg += "🚨 **ATTENZIONE:** Consumo elevato previsto!\n"
+        elif projected_percentage > 60:
+            status_msg += "⚠️ **NOTA:** Consumo nella norma\n"
+        else:
+            status_msg += "✅ **OK:** Consumo sotto controllo\n"
+            
+        status_msg += f"\n🕒 Aggiornato: {today.strftime('%d/%m/%Y %H:%M')}"
+        
+        return status_msg
+        
+    except Exception as e:
+        return f"❌ Errore nel calcolo: {str(e)}"
+
+def get_system_metrics():
+    """Ottiene metriche di sistema base"""
+    try:
+        # Metriche di memoria
+        process = psutil.Process(os.getpid())
+        process_memory = process.memory_info().rss / 1024 / 1024  # MB
+        
+        system_memory = psutil.virtual_memory()
+        total_memory_used = system_memory.used / 1024 / 1024  # MB
+        total_memory_total = system_memory.total / 1024 / 1024  # MB
+        memory_percent = system_memory.percent
+        
+        # Metriche di CPU
+        cpu_percent = psutil.cpu_percent(interval=1)
+        
+        # Uptime del sistema
+        boot_time = datetime.fromtimestamp(psutil.boot_time())
+        uptime = datetime.now() - boot_time
+        
+        metrics_msg = "📊 **METRICHE DI SISTEMA:**\n"
+        metrics_msg += f"• RAM Bot: {process_memory:.1f}MB\n"
+        metrics_msg += f"• RAM Sistema: {total_memory_used:.1f}MB / {total_memory_total:.1f}MB ({memory_percent:.1f}%)\n"
+        metrics_msg += f"• CPU: {cpu_percent:.1f}%\n"
+        metrics_msg += f"• Uptime: {str(uptime).split('.')[0]}\n"
+        
+        return metrics_msg
+        
+    except Exception as e:
+        return f"📊 Errore metriche: {str(e)}"
+
 # === FUNZIONI ARTICOLI ===
 def get_prefisso_categoria(categoria):
+    """Restituisce il prefisso automatico per ogni categoria"""
     prefissi = {
         "maschera": "MAS",
         "erogatore": "ER", 
         "spallaccio": "SPAL",
         "bombola": "BOMB",
-        "seconda_utenza": "2aUT"
+        "seconda_utenza": "2aUT"  # NUOVO PREFISSO
     }
     return prefissi.get(categoria, "ART")
 
 def insert_articolo(seriale, categoria, sede, stato="disponibile"):
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     try:
         c.execute('''INSERT INTO articoli (seriale, categoria, sede, stato) 
@@ -193,27 +548,38 @@ def insert_articolo(seriale, categoria, sede, stato="disponibile"):
     finally:
         conn.close()
 
+def get_articolo(seriale):
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
+    c = conn.cursor()
+    c.execute("SELECT * FROM articoli WHERE seriale = ?", (seriale,))
+    result = c.fetchone()
+    conn.close()
+    return result
+
 def update_stato(seriale, stato):
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("UPDATE articoli SET stato = ? WHERE seriale = ?", (stato, seriale))
     conn.commit()
     conn.close()
 
 def delete_articolo(seriale):
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("DELETE FROM articoli WHERE seriale = ?", (seriale,))
     conn.commit()
     conn.close()
 
 def get_articoli_per_stato(stato):
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     
+    # Gestisce sia stati base che stati combinati
     if stato == 'usato':
+        # Include sia usato che usato_centrale
         c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato IN ('usato', 'usato_centrale')")
     elif stato == 'fuori_uso':
+        # Include sia fuori_uso che fuori_uso_centrale
         c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato IN ('fuori_uso', 'fuori_uso_centrale')")
     elif stato == 'disponibile':
         c.execute("SELECT seriale, categoria, sede FROM articoli WHERE stato = ?", (stato,))
@@ -224,8 +590,16 @@ def get_articoli_per_stato(stato):
     conn.close()
     return result
 
+def get_articoli_per_categoria(categoria):
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
+    c = conn.cursor()
+    c.execute("SELECT seriale, categoria, sede, stato FROM articoli WHERE categoria = ?", (categoria,))
+    result = c.fetchall()
+    conn.close()
+    return result
+
 def get_tutti_articoli():
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute("SELECT seriale, categoria, sede, stato FROM articoli")
     result = c.fetchall()
@@ -233,7 +607,8 @@ def get_tutti_articoli():
     return result
 
 def conta_bombole_disponibili():
-    conn = sqlite3.connect(DATABASE_NAME)
+    """CONTA TOTALE BOMBOLE (Erba + Centrale) - NUOVA VERSIONE"""
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute('''SELECT COUNT(*) FROM articoli 
                  WHERE categoria = 'bombola' AND stato = 'disponibile' ''')
@@ -242,7 +617,8 @@ def conta_bombole_disponibili():
     return risultato
 
 def get_categorie_con_articoli(stato=None):
-    conn = sqlite3.connect(DATABASE_NAME)
+    """Restituisce le categorie che hanno articoli in un determinato stato"""
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     
     if stato:
@@ -255,15 +631,16 @@ def get_categorie_con_articoli(stato=None):
     return result
 
 def organizza_articoli_per_categoria(articoli):
+    """Organizza gli articoli per categoria nell'ordine prestabilito"""
     articoli_organizzati = {}
     
     for categoria in ORDINE_CATEGORIE:
         articoli_organizzati[categoria] = []
     
     for articolo in articoli:
-        if len(articolo) == 4:
+        if len(articolo) == 4:  # (seriale, cat, sede, stato)
             seriale, cat, sede, stato = articolo
-        else:
+        else:  # (seriale, cat, sede)
             seriale, cat, sede = articolo
             stato = None
             
@@ -271,6 +648,146 @@ def organizza_articoli_per_categoria(articoli):
             articoli_organizzati[cat].append((seriale, sede, stato))
     
     return articoli_organizzati
+
+# === NUOVA FUNZIONE: RICOSTRUISCI DATABASE DA INVENTARIO ===
+def ricostruisci_database_da_inventario(testo_inventario):
+    """
+    Ricostruisce il database dal testo dell'inventario
+    Restituisce (successo, messaggio)
+    """
+    try:
+        # Pulisce il database esistente (mantiene solo utenti)
+        conn = sqlite3.connect(DATABASE_NAME)
+        c = conn.cursor()
+        c.execute("DELETE FROM articoli")
+        
+        # Mappatura per riconoscere le categorie dal testo
+        mappatura_categorie = {
+            "⚗️ Bombola": "bombola",
+            "🎭 Maschera": "maschera", 
+            "💨 Erogatore": "erogatore",
+            "🎽 Spallaccio": "spallaccio",
+            "🏠 Seconda Utenza": "seconda_utenza"
+        }
+        
+        mappatura_sedi = {
+            "🌿 Erba": "erba",
+            "🏢 Centrale": "centrale"
+        }
+        
+        mappatura_stati = {
+            "🟢 DISPONIBILI": "disponibile",
+            "🔴 USATI": "usato",
+            "⚫ FUORI USO": "fuori_uso"
+        }
+        
+        lines = testo_inventario.split('\n')
+        categoria_corrente = None
+        stato_corrente = None
+        articoli_inseriti = 0
+        errori = 0
+        articoli_invalidi = []
+        
+        print(f"🔍 Analizzando {len(lines)} righe...")  # DEBUG
+        
+        for i, line in enumerate(lines):
+            line = line.strip()
+            #print(f"Riga {i}: {line}")  # DEBUG
+            
+            # Controlla se è un header di STATO (DISPONIBILI, USATI, FUORI USO)
+            for stato_testo, stato_db in mappatura_stati.items():
+                if stato_testo in line:
+                    stato_corrente = stato_db
+                    categoria_corrente = None
+                    print(f"📌 Trovato stato: {stato_testo} -> {stato_db}")  # DEBUG
+                    break
+            
+            # Controlla se è un header di CATEGORIA (Bombola, Maschera, etc.)
+            for cat_testo, cat_db in mappatura_categorie.items():
+                if cat_testo in line and ":" in line:  # Cerca ":" che indica una categoria
+                    categoria_corrente = cat_db
+                    print(f"📌 Trovata categoria: {cat_testo} -> {cat_db}")  # DEBUG
+                    break
+            
+            # Se è un articolo (inizia con • e abbiamo stato e categoria)
+            if line.startswith('•') and categoria_corrente and stato_corrente:
+                try:
+                    # Estrai il seriale (es: "• BOMB_001_ERBA - 🌿 Erba" -> "BOMB_001_ERBA")
+                    if ' - ' in line:
+                        parts = line.split(' - ')[0]  # Prende "• BOMB_001_ERBA"
+                        seriale = parts[2:].strip()  # Rimuove "• " e spazi
+                    else:
+                        # Se non c'è " - ", prendi tutto dopo il •
+                        seriale = line[2:].strip()
+                    
+                    print(f"🔍 Trovato articolo: {seriale}")  # DEBUG
+                    
+                    # Estrai la sede dal testo
+                    sede_trovata = None
+                    for sede_testo, sede_db in mappatura_sedi.items():
+                        if sede_testo in line:
+                            sede_trovata = sede_db
+                            break
+                    
+                    if not sede_trovata:
+                        # Se non trova la sede nel testo, prova a dedurla dal seriale
+                        if seriale.endswith('_ERBA'):
+                            sede_trovata = 'erba'
+                        elif seriale.endswith('_CENTRALE'):
+                            sede_trovata = 'centrale'
+                    
+                    if sede_trovata and seriale:
+                        # Gestisci stati speciali per centrale
+                        stato_finale = stato_corrente
+                        if " (Centrale)" in line:
+                            if stato_corrente == "usato":
+                                stato_finale = "usato_centrale"
+                            elif stato_corrente == "fuori_uso":
+                                stato_finale = "fuori_uso_centrale"
+                        
+                        print(f"✅ Inserendo: {seriale}, {categoria_corrente}, {sede_trovata}, {stato_finale}")  # DEBUG
+                        
+                        # Inserisci nel database
+                        c.execute('''INSERT OR IGNORE INTO articoli (seriale, categoria, sede, stato) 
+                                     VALUES (?, ?, ?, ?)''', (seriale, categoria_corrente, sede_trovata, stato_finale))
+                        
+                        if c.rowcount > 0:
+                            articoli_inseriti += 1
+                            print(f"✅ Articolo inserito: {seriale}")  # DEBUG
+                        else:
+                            errori += 1  # Duplicato o errore
+                            print(f"❌ Duplicato/salto: {seriale}")  # DEBUG
+                    else:
+                        errori += 1
+                        articoli_invalidi.append(f"{seriale} (sede non trovata)")
+                        print(f"❌ Sede non trovata per: {seriale}")  # DEBUG
+                            
+                except Exception as e:
+                    errori += 1
+                    articoli_invalidi.append(line)
+                    print(f"❌ Errore elaborazione riga: {line} - {e}")
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"📊 Ricostruzione completata: {articoli_inseriti} inseriti, {errori} errori")  # DEBUG
+        
+        messaggio = f"✅ Database ricostruito con successo!\n• Articoli inseriti: {articoli_inseriti}\n• Errori/duplicati: {errori}"
+        
+        if articoli_invalidi:
+            messaggio += f"\n\n❌ Articoli con problemi (saltati):\n"
+            for invalido in articoli_invalidi[:10]:  # Mostra solo primi 10 per non appesantire
+                messaggio += f"• {invalido}\n"
+            if len(articoli_invalidi) > 10:
+                messaggio += f"• ... e altri {len(articoli_invalidi) - 10} articoli\n"
+        
+        return True, messaggio
+        
+    except Exception as e:
+        import traceback
+        print(f"🚨 Errore grave durante ricostruzione: {str(e)}")
+        print(traceback.format_exc())
+        return False, f"❌ Errore durante la ricostruzione: {str(e)}"
 
 # === FUNZIONE HELP ===
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -295,8 +812,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 📈 Visualizzare statistiche dettagliate
 • ⚠️ Ricevere allarmi automatici per scorte bombole
 • 👥 Gestire richieste accesso nuovi utenti
+• 📤 Caricare inventario per ricostruire database
 
 🔄 **SISTEMA SEMPRE ATTIVO:**
+• ✅ Ping automatici ogni 5 minuti
+• ✅ Backup automatico ogni 25 minuti
+• ✅ Zero tempi di attesa
 • ✅ Servizio 24/7 garantito
 """
 
@@ -318,6 +839,11 @@ def crea_tastiera_fisica(user_id):
         tastiera.append([KeyboardButton("➕ Aggiungi"), KeyboardButton("➖ Rimuovi")])
         tastiera.append([KeyboardButton("🔄 Ripristina"), KeyboardButton("📊 Statistiche")])
         tastiera.append([KeyboardButton("👥 Gestisci Richieste")])
+        tastiera.append([KeyboardButton("📤 Carica Inventario")])  # NUOVO PULSANTE
+        
+        # AGGIUNGI QUESTO: pulsante status server solo per l'admin specifico
+        if user_id == 1816045269:
+            tastiera.append([KeyboardButton("🖥️ Status Server")])
 
     return ReplyKeyboardMarkup(tastiera, resize_keyboard=True, is_persistent=True)
 
@@ -326,7 +852,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name
     
-    conn = sqlite3.connect(DATABASE_NAME)
+    conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
     c = conn.cursor()
     c.execute('''INSERT OR IGNORE INTO utenti (user_id, username, nome, ruolo) 
                  VALUES (?, ?, ?, 'in_attesa')''', 
@@ -358,7 +884,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(welcome_text, reply_markup=crea_tastiera_fisica(user_id))
 
-# === GESTIONE RICHIESTE ACCESSO ===
+# === GESTIONE RICHIESTE ACCESSO UNO ALLA VOLTA ===
 async def gestisci_richieste(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id):
@@ -369,6 +895,7 @@ async def gestisci_richieste(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("✅ Nessuna richiesta di accesso in sospeso.")
         return
 
+    # Prendi solo la PRIMA richiesta
     prima_richiesta = richieste[0]
     user_id_rich, username, nome, data_richiesta = prima_richiesta
     data = data_richiesta.split()[0] if data_richiesta else "N/A"
@@ -405,7 +932,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await start(update, context)
         return
 
-    # INVENTARIO
+    # INVENTARIO - NUOVA VERSIONE ORGANIZZATA
     elif text == "📋 Inventario":
         articoli = get_tutti_articoli()
         if not articoli:
@@ -414,10 +941,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         msg = "📋 **INVENTARIO COMPLETO**\n\n"
         
+        # ORGANIZZA PER STATO E CATEGORIA
         disponibili = [a for a in articoli if a[3] == 'disponibile']
         usati = [a for a in articoli if a[3] in ['usato', 'usato_centrale']]
         fuori_uso = [a for a in articoli if a[3] in ['fuori_uso', 'fuori_uso_centrale']]
         
+        # DISPONIBILI
         if disponibili:
             msg += f"🟢 **DISPONIBILI** ({len(disponibili)}):\n"
             disponibili_organizzati = organizza_articoli_per_categoria(disponibili)
@@ -426,11 +955,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 articoli_cat = disponibili_organizzati[categoria]
                 if articoli_cat:
                     msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                    # ORDINA PER CODICE (dal basso all'alto)
                     articoli_cat.sort(key=lambda x: x[0], reverse=True)
                     for seriale, sede, _ in articoli_cat:
                         msg += f"• {seriale} - {SEDI[sede]}\n"
             msg += "\n"
         
+        # USATI
         if usati:
             msg += f"🔴 **USATI** ({len(usati)}):\n"
             usati_organizzati = organizza_articoli_per_categoria(usati)
@@ -439,12 +970,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 articoli_cat = usati_organizzati[categoria]
                 if articoli_cat:
                     msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                    # ORDINA PER CODICE (dal basso all'alto)
                     articoli_cat.sort(key=lambda x: x[0], reverse=True)
                     for seriale, sede, stato in articoli_cat:
                         locazione = " (Centrale)" if stato == 'usato_centrale' else ""
                         msg += f"• {seriale} - {SEDI[sede]}{locazione}\n"
             msg += "\n"
         
+        # FUORI USO
         if fuori_uso:
             msg += f"⚫ **FUORI USO** ({len(fuori_uso)}):\n"
             fuori_uso_organizzati = organizza_articoli_per_categoria(fuori_uso)
@@ -453,6 +986,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 articoli_cat = fuori_uso_organizzati[categoria]
                 if articoli_cat:
                     msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                    # ORDINA PER CODICE (dal basso all'alto)
                     articoli_cat.sort(key=lambda x: x[0], reverse=True)
                     for seriale, sede, stato in articoli_cat:
                         locazione = " (Centrale)" if stato == 'fuori_uso_centrale' else ""
@@ -461,8 +995,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"\n📊 **Totale articoli:** {len(articoli)}"
         await update.message.reply_text(msg)
 
-    # SEGNA USATO
+    # SEGNA USATO - NUOVA VERSIONE CON SELEZIONE CATEGORIA
     elif text == "🔴 Segna Usato":
+        # Prima mostra le categorie che hanno articoli disponibili
         categorie_con_articoli = get_categorie_con_articoli('disponibile')
         
         if not categorie_con_articoli:
@@ -491,6 +1026,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             articoli_cat = articoli_organizzati[categoria]
             if articoli_cat:
                 msg += f"**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                # ORDINA PER CODICE (dal basso all'alto)
                 articoli_cat.sort(key=lambda x: x[0], reverse=True)
                 for seriale, sede, _ in articoli_cat:
                     msg += f"• {seriale} - {SEDI[sede]}\n"
@@ -512,6 +1048,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             articoli_cat = articoli_organizzati[categoria]
             if articoli_cat:
                 msg += f"**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                # ORDINA PER CODICE (dal basso all'alto)
                 articoli_cat.sort(key=lambda x: x[0], reverse=True)
                 for seriale, sede, _ in articoli_cat:
                     locazione = " (Centrale)" if any(a[0] == seriale and a[3] == 'usato_centrale' for a in get_tutti_articoli()) else ""
@@ -520,8 +1057,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(msg)
 
-    # FUORI USO
+    # FUORI USO - CORRETTO: PER CREARE FUORI USO
     elif text == "⚫ Fuori Uso":
+        # Per utenti normali: solo visualizzazione
         if not is_admin(user_id):
             articoli_fuori_uso = get_articoli_per_stato('fuori_uso')
             if not articoli_fuori_uso:
@@ -535,6 +1073,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 articoli_cat = articoli_organizzati[categoria]
                 if articoli_cat:
                     msg += f"**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                    # ORDINA PER CODICE (dal basso all'alto)
                     articoli_cat.sort(key=lambda x: x[0], reverse=True)
                     for seriale, sede, _ in articoli_cat:
                         locazione = " (Centrale)" if any(a[0] == seriale and a[3] == 'fuori_uso_centrale' for a in get_tutti_articoli()) else ""
@@ -545,8 +1084,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(msg)
             return
 
+        # Per admin: CREARE FUORI USO - prima mostra categorie con articoli disponibili/usati
         categorie_con_articoli = get_categorie_con_articoli('disponibile') + get_categorie_con_articoli('usato')
-        categorie_con_articoli = list(set(categorie_con_articoli))
+        categorie_con_articoli = list(set(categorie_con_articoli))  # Rimuovi duplicati
         
         if not categorie_con_articoli:
             await update.message.reply_text("⚫ Nessun articolo da segnare como fuori uso")
@@ -570,7 +1110,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("📦 Seleziona categoria:", reply_markup=reply_markup)
 
-    # RIMUOVI (solo admin)
+    # RIMUOVI (solo admin) - MODIFICATO PER SELEZIONE MULTIPLA
     elif text == "➖ Rimuovi" and is_admin(user_id):
         context.user_data['azione'] = 'rimuovi_categoria'
         keyboard = [
@@ -580,7 +1120,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("➖ Seleziona categoria:", reply_markup=reply_markup)
 
-    # RIPRISTINA (solo admin)
+    # RIPRISTINA (solo admin) - MODIFICATO PER SELEZIONE MULTIPLA
     elif text == "🔄 Ripristina" and is_admin(user_id):
         articoli_usati = get_articoli_per_stato('usato')
         articoli_fuori_uso = get_articoli_per_stato('fuori_uso')
@@ -590,15 +1130,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ Nessun articolo da ripristinare")
             return
 
+        # Inizializza la lista delle selezioni
         context.user_data['selezioni_ripristina'] = []
         
         keyboard = []
+        # ORDINA PER CODICE (dal basso all'alto)
         articoli.sort(key=lambda x: x[0], reverse=True)
         for seriale, cat, sed in articoli:
             stato_attuale = "usato" if (seriale, cat, sed) in articoli_usati else "fuori uso"
             nome = f"{seriale} - {CATEGORIE[cat]} ({stato_attuale})"
             keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_ripristina_{seriale}")])
         
+        # Aggiungi pulsante per conferma selezione
         keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_ripristina")])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -609,7 +1152,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
 
-    # STATISTICHE (solo admin)
+    # STATISTICHE (solo admin) - NUOVA VERSIONE CON BOMBOLE COMBINATE
     elif text == "📊 Statistiche" and is_admin(user_id):
         articoli = get_tutti_articoli()
         totale = len(articoli)
@@ -617,6 +1160,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         usati = len([a for a in articoli if a[3] in ['usato', 'usato_centrale']])
         fuori_uso = len([a for a in articoli if a[3] in ['fuori_uso', 'fuori_uso_centrale']])
 
+        # NUOVO: BOMBOLE COMBINATE (Erba + Centrale)
         bombole_totali = conta_bombole_disponibili()
 
         msg = "📊 **STATISTICHE COMPLETE**\n\n"
@@ -642,22 +1186,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "👥 Gestisci Richieste" and is_admin(user_id):
         await gestisci_richieste(update, context)
 
+    # NUOVO: CARICA INVENTARIO (solo admin)
+    elif text == "📤 Carica Inventario" and is_admin(user_id):
+        context.user_data['azione'] = 'carica_inventario'
+        await update.message.reply_text(
+            "📤 **CARICA INVENTARIO PER RICOSTRUIRE DATABASE**\n\n"
+            "Incolla il testo completo dell'inventario (come generato dal bot).\n\n"
+            "⚠️ **ATTENZIONE:** Questa operazione SOSTITUIRÀ completamente il database attuale!\n"
+            "✅ Assicurati che il testo sia esattamente come generato dal comando '📋 Inventario'.\n\n"
+            "Incolla ora il testo dell'inventario:"
+        )
+
     # HELP
     elif text == "🆘 Help":
         await help_command(update, context)
 
-    # IN CENTRALE - CORRETTO
+    # IN CENTRALE - NUOVA FUNZIONALITÀ
     elif text == "📍 In Centrale":
         if not is_user_approved(user_id):
             await update.message.reply_text("❌ Accesso non autorizzato")
             return
 
+        # Mostra il menu principale per la gestione centrale
         keyboard = [
             [InlineKeyboardButton("📤 Sposta Usati in Centrale", callback_data="centrale_sposta_usati")],
             [InlineKeyboardButton("📤 Sposta Fuori Uso in Centrale", callback_data="centrale_sposta_fuori_uso")],
             [InlineKeyboardButton("📋 Inventario Centrale", callback_data="centrale_inventario")],
         ]
         
+        # Conta gli articoli in centrale per il riassunto
         articoli_centrale = get_articoli_in_centrale()
         usati_centrale = len([a for a in articoli_centrale if a[3] == 'usato_centrale'])
         fuori_uso_centrale = len([a for a in articoli_centrale if a[3] == 'fuori_uso_centrale'])
@@ -672,12 +1229,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(messaggio, reply_markup=reply_markup)
 
+    # STATUS SERVER (SOLO PER ADMIN SPECIFICO)
+    elif text == "🖥️ Status Server" and user_id == 1816045269:
+        # Mostra lo stato del server e il consumo estimato
+        usage_info = get_render_usage_simple()
+        system_info = get_system_metrics()
+        
+        status_msg = f"{usage_info}\n\n{system_info}"
+        await update.message.reply_text(status_msg)
+
     # INSERIMENTO NUMERO
     elif context.user_data.get('azione') == 'inserisci_numero':
         numero = text.strip()
         categoria = context.user_data['categoria_da_aggiungere']
         sede = context.user_data['sede_da_aggiungere']
         
+        # NUOVA VERIFICA: deve avere esattamente 3 cifre
         if not numero.isdigit() or len(numero) != 3:
             await update.message.reply_text(
                 "❌ Formato numero non valido!\n"
@@ -703,216 +1270,394 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if key in context.user_data:
                 del context.user_data[key]
 
+    # NUOVO: GESTIONE CARICA INVENTARIO
+    elif context.user_data.get('azione') == 'carica_inventario':
+        if not is_admin(user_id):
+            return
+            
+        testo_inventario = text.strip()
+        
+        # Conferma prima di procedere
+        context.user_data['inventario_da_caricare'] = testo_inventario
+        context.user_data['azione'] = 'conferma_carica_inventario'
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ CONFERMA Ricostruzione", callback_data="conferma_ricostruzione"),
+                InlineKeyboardButton("❌ ANNULLA", callback_data="annulla_ricostruzione")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "⚠️ **CONFERMA RICOSTRUZIONE DATABASE**\n\n"
+            "Sei sicuro di voler RICOSTRUIRE il database dall'inventario?\n\n"
+            "❌ **TUTTI GLI ARTICOLI ATTUALE SARANNO ELIMINATI!**\n"
+            "✅ Verranno ricreati basandosi sul testo dell'inventario.\n\n"
+            "Questa operazione è IRREVERSIBILE!",
+            reply_markup=reply_markup
+        )
+
     else:
         await update.message.reply_text("ℹ️ Usa i pulsanti per navigare.", reply_markup=crea_tastiera_fisica(user_id))
 
-# === GESTIONE BOTTONI INLINE - SEZIONE CENTRALE CORRETTA ===
+# === GESTIONE BOTTONI INLINE ===
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
     user_id = query.from_user.id
 
-    # GESTIONE CENTRALE - SPOSTA USATI
-    if data == "centrale_sposta_usati":
-        articoli_usati = get_articoli_per_stato_centrale('usato', escludi_centrale=True)
-        if not articoli_usati:
-            await query.edit_message_text("❌ Nessun articolo usato da spostare in centrale (o tutti già in centrale)")
+    # SEGNA USATO - SELEZIONE CATEGORIA
+    if data.startswith("usato_cat_"):
+        categoria = data[10:]
+        articoli = get_articoli_per_stato('disponibile')
+        articoli_categoria = [a for a in articoli if a[1] == categoria]
+        
+        if not articoli_categoria:
+            await query.edit_message_text(f"❌ Nessun articolo disponibile per {CATEGORIE[categoria]}")
             return
 
-        context.user_data['selezioni_centrale_usati'] = []
+        # Inizializza la lista delle selezioni per questa categoria
+        context.user_data['selezioni_usato'] = []
+        context.user_data['categoria_corrente'] = categoria
         
         keyboard = []
-        articoli_usati.sort(key=lambda x: x[0], reverse=True)
-        for seriale, cat, sed in articoli_usati:
+        # ORDINA PER CODICE (dal basso all'alto)
+        articoli_categoria.sort(key=lambda x: x[0], reverse=True)
+        for seriale, cat, sed in articoli_categoria:
             nome = f"{seriale} - {SEDI[sed]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_usato_{seriale}")])
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_usato_{seriale}")])
         
-        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_usati")])
+        # Aggiungi pulsante per conferma selezione
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data=f"conferma_usato_{categoria}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "📤 Seleziona articoli USATI da spostare in CENTRALE:\n\n"
-            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
-            "📝 Articoli selezionati: 0",
+            f"🔴 Seleziona {CATEGORIE[categoria]} da segnare como USATO:\n\n"
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: 0",
             reply_markup=reply_markup
         )
 
-    # SELEZIONE ARTICOLO USATO PER CENTRALE - CORRETTO
-    elif data.startswith("seleziona_centrale_usato_"):
-        seriale = data[24:]
-        selezioni = context.user_data.get('selezioni_centrale_usati', [])
+    # SELEZIONE ARTICOLO USATO (aggiunge/rimuove dalla lista)
+    elif data.startswith("seleziona_usato_"):
+        seriale = data[16:]
+        selezioni = context.user_data.get('selezioni_usato', [])
         
         if seriale in selezioni:
             selezioni.remove(seriale)
         else:
             selezioni.append(seriale)
         
-        context.user_data['selezioni_centrale_usati'] = selezioni
+        context.user_data['selezioni_usato'] = selezioni
         
-        # RICREA COMPLETAMENTE LA TASTIERA AGGIORNATA
-        articoli_usati = get_articoli_per_stato_centrale('usato', escludi_centrale=True)
+        # Ricrea la tastiera aggiornata
+        categoria = context.user_data.get('categoria_corrente', '')
+        articoli = get_articoli_per_stato('disponibile')
+        articoli_categoria = [a for a in articoli if a[1] == categoria]
         
         keyboard = []
-        articoli_usati.sort(key=lambda x: x[0], reverse=True)
-        for art_seriale, cat, sed in articoli_usati:
+        articoli_categoria.sort(key=lambda x: x[0], reverse=True)
+        for art_seriale, cat, sed in articoli_categoria:
             nome = f"{art_seriale} - {SEDI[sed]}"
-            # AGGIUNGI LA SPUNTA SE SELEZIONATO
             if art_seriale in selezioni:
                 nome = f"✅ {nome}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_usato_{art_seriale}")])
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_usato_{art_seriale}")])
         
-        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_usati")])
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data=f"conferma_usato_{categoria}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "📤 Seleziona articoli USATI da spostare in CENTRALE:\n\n"
+            f"🔴 Seleziona {CATEGORIE[categoria]} da segnare como USATO:\n\n"
             f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
             f"📝 Articoli selezionati: {len(selezioni)}",
             reply_markup=reply_markup
         )
 
-    # CONFERMA SPOSTAMENTO USATI IN CENTRALE - CORRETTO
-    elif data == "conferma_centrale_usati":
-        selezioni = context.user_data.get('selezioni_centrale_usati', [])
+    # CONFERMA SELEZIONE USATO
+    elif data.startswith("conferma_usato_"):
+        selezioni = context.user_data.get('selezioni_usato', [])
         
         if not selezioni:
             await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
             return
         
-        success_count = 0
+        # Processa tutti gli articoli selezionati
         for seriale in selezioni:
-            if sposta_in_centrale(seriale):
-                success_count += 1
+            update_stato(seriale, "usato")
         
-        await query.edit_message_text(f"✅ {success_count} articoli usati spostati in CENTRALE!")
+        await query.edit_message_text(f"✅ {len(selezioni)} articoli segnati como USATI!")
         
-        if 'selezioni_centrale_usati' in context.user_data:
-            del context.user_data['selezioni_centrale_usati']
+        # Pulisci i dati temporanei
+        if 'selezioni_usato' in context.user_data:
+            del context.user_data['selezioni_usato']
+        if 'categoria_corrente' in context.user_data:
+            del context.user_data['categoria_corrente']
 
-    # GESTIONE CENTRALE - SPOSTA FUORI USO
-    elif data == "centrale_sposta_fuori_uso":
-        articoli_fuori_uso = get_articoli_per_stato_centrale('fuori_uso', escludi_centrale=True)
-        if not articoli_fuori_uso:
-            await query.edit_message_text("❌ Nessun articolo fuori uso da spostare in centrale (o tutti già in centrale)")
+    # CREA FUORI USO - SELEZIONE CATEGORIA (PER ADMIN)
+    elif data.startswith("crea_fuori_uso_cat_"):
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono mettere articoli fuori uso!", show_alert=True)
+            return
+            
+        categoria = data[19:]
+        articoli_disponibili = get_articoli_per_stato('disponibile')
+        articoli_usati = get_articoli_per_stato('usato')
+        articoli_categoria = [a for a in articoli_disponibili + articoli_usati if a[1] == categoria]
+        
+        if not articoli_categoria:
+            await query.edit_message_text(f"❌ Nessun articolo per {CATEGORIE[categoria]}")
             return
 
-        context.user_data['selezioni_centrale_fuori_uso'] = []
+        # Inizializza la lista delle selezioni
+        context.user_data['selezioni_fuori_uso'] = []
+        context.user_data['categoria_corrente_fuori_uso'] = categoria
         
         keyboard = []
-        articoli_fuori_uso.sort(key=lambda x: x[0], reverse=True)
-        for seriale, cat, sed in articoli_fuori_uso:
+        # ORDINA PER CODICE (dal basso all'alto)
+        articoli_categoria.sort(key=lambda x: x[0], reverse=True)
+        for seriale, cat, sed in articoli_categoria:
             nome = f"{seriale} - {SEDI[sed]}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_fuori_uso_{seriale}")])
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_fuori_uso_{seriale}")])
         
-        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_fuori_uso")])
+        # Aggiungi pulsante per conferma selezione
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data=f"conferma_fuori_uso_{categoria}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "📤 Seleziona articoli FUORI USO da spostare in CENTRALE:\n\n"
-            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
-            "📝 Articoli selezionati: 0",
+            f"⚫ Seleziona {CATEGORIE[categoria]} da segnare como FUORI USO:\n\n"
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: 0",
             reply_markup=reply_markup
         )
 
-    # SELEZIONE ARTICOLO FUORI USO PER CENTRALE - CORRETTO
-    elif data.startswith("seleziona_centrale_fuori_uso_"):
-        seriale = data[28:]
-        selezioni = context.user_data.get('selezioni_centrale_fuori_uso', [])
+    # SELEZIONE ARTICOLO FUORI USO (aggiunge/rimuove dalla lista)
+    elif data.startswith("seleziona_fuori_uso_"):
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono mettere articoli fuori uso!", show_alert=True)
+            return
+            
+        seriale = data[20:]
+        selezioni = context.user_data.get('selezioni_fuori_uso', [])
         
         if seriale in selezioni:
             selezioni.remove(seriale)
         else:
             selezioni.append(seriale)
         
-        context.user_data['selezioni_centrale_fuori_uso'] = selezioni
+        context.user_data['selezioni_fuori_uso'] = selezioni
         
-        # RICREA COMPLETAMENTE LA TASTIERA AGGIORNATA
-        articoli_fuori_uso = get_articoli_per_stato_centrale('fuori_uso', escludi_centrale=True)
+        # Ricrea la tastiera aggiornata
+        categoria = context.user_data.get('categoria_corrente_fuori_uso', '')
+        articoli_disponibili = get_articoli_per_stato('disponibile')
+        articoli_usati = get_articoli_per_stato('usato')
+        articoli_categoria = [a for a in articoli_disponibili + articoli_usati if a[1] == categoria]
         
         keyboard = []
-        articoli_fuori_uso.sort(key=lambda x: x[0], reverse=True)
-        for art_seriale, cat, sed in articoli_fuori_uso:
+        articoli_categoria.sort(key=lambda x: x[0], reverse=True)
+        for art_seriale, cat, sed in articoli_categoria:
             nome = f"{art_seriale} - {SEDI[sed]}"
-            # AGGIUNGI LA SPUNTA SE SELEZIONATO
             if art_seriale in selezioni:
                 nome = f"✅ {nome}"
-            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_fuori_uso_{art_seriale}")])
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_fuori_uso_{art_seriale}")])
         
-        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_fuori_uso")])
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data=f"conferma_fuori_uso_{categoria}")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "📤 Seleziona articoli FUORI USO da spostare in CENTRALE:\n\n"
+            f"⚫ Seleziona {CATEGORIE[categoria]} da segnare como FUORI USO:\n\n"
             f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
             f"📝 Articoli selezionati: {len(selezioni)}",
             reply_markup=reply_markup
         )
 
-    # CONFERMA SPOSTAMENTO FUORI USO IN CENTRALE - CORRETTO
-    elif data == "conferma_centrale_fuori_uso":
-        selezioni = context.user_data.get('selezioni_centrale_fuori_uso', [])
+    # CONFERMA SELEZIONE FUORI USO
+    elif data.startswith("conferma_fuori_uso_"):
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono mettere articoli fuori uso!", show_alert=True)
+            return
+            
+        selezioni = context.user_data.get('selezioni_fuori_uso', [])
         
         if not selezioni:
             await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
             return
         
+        # Processa tutti gli articoli selezionati
+        for seriale in selezioni:
+            update_stato(seriale, "fuori_uso")
+        
+        await query.edit_message_text(f"✅ {len(selezioni)} articoli segnati como FUORI USO!")
+        
+        # Pulisci i dati temporanei
+        if 'selezioni_fuori_uso' in context.user_data:
+            del context.user_data['selezioni_fuori_uso']
+        if 'categoria_corrente_fuori_uso' in context.user_data:
+            del context.user_data['categoria_corrente_fuori_uso']
+
+    # SELEZIONE RIPRISTINA (aggiunge/rimuove dalla lista)
+    elif data.startswith("seleziona_ripristina_"):
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono ripristinare articoli!", show_alert=True)
+            return
+            
+        seriale = data[21:]
+        selezioni = context.user_data.get('selezioni_ripristina', [])
+        
+        if seriale in selezioni:
+            selezioni.remove(seriale)
+        else:
+            selezioni.append(seriale)
+        
+        context.user_data['selezioni_ripristina'] = selezioni
+        
+        # Ricrea la tastiera aggiornata
+        articoli_usati = get_articoli_per_stato('usato')
+        articoli_fuori_uso = get_articoli_per_stato('fuori_uso')
+        articoli = articoli_usati + articoli_fuori_uso
+        
+        keyboard = []
+        articoli.sort(key=lambda x: x[0], reverse=True)
+        for art_seriale, cat, sed in articoli:
+            stato_attuale = "usato" if (art_seriale, cat, sed) in articoli_usati else "fuori uso"
+            nome = f"{art_seriale} - {CATEGORIE[cat]} ({stato_attuale})"
+            if art_seriale in selezioni:
+                nome = f"✅ {nome}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_ripristina_{art_seriale}")])
+        
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_ripristina")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "🔄 Seleziona articoli da ripristinare a DISPONIBILE:\n\n"
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: {len(selezioni)}",
+            reply_markup=reply_markup
+        )
+
+    # CONFERMA RIPRISTINA
+    elif data == "conferma_ripristina":
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono ripristinare articoli!", show_alert=True)
+            return
+            
+        selezioni = context.user_data.get('selezioni_ripristina', [])
+        
+        if not selezioni:
+            await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
+            return
+        
+        # Processa tutti gli articoli selezionati
+        for seriale in selezioni:
+            update_stato(seriale, "disponibile")
+        
+        await query.edit_message_text(f"✅ {len(selezioni)} articoli ripristinati a DISPONIBILE!")
+        
+        # Pulisci i dati temporanei
+        if 'selezioni_ripristina' in context.user_data:
+            del context.user_data['selezioni_ripristina']
+
+    # RIMUOVI - SELEZIONE CATEGORIA
+    elif data.startswith("rimuovi_cat_"):
+        categoria = data[12:]
+        articoli = get_articoli_per_stato('disponibile') + get_articoli_per_stato('usato') + get_articoli_per_stato('fuori_uso')
+        articoli_categoria = [a for a in articoli if a[1] == categoria]
+        
+        if not articoli_categoria:
+            await query.edit_message_text(f"❌ Nessun articolo per {CATEGORIE[categoria]}")
+            return
+        
+        # Inizializza la lista delle selezioni
+        context.user_data['selezioni_rimuovi'] = []
+        context.user_data['categoria_corrente_rimuovi'] = categoria
+        
+        keyboard = []
+        # ORDINA PER CODICE (dal basso all'alto)
+        articoli_categoria.sort(key=lambda x: x[0], reverse=True)
+        for seriale, cat, sede in articoli_categoria:
+            nome = f"{seriale} - {SEDI[sede]}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_rimuovi_{seriale}")])
+        
+        # Aggiungi pulsante per conferma selezione
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data=f"conferma_rimuovi_{categoria}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"➖ Seleziona articoli da ELIMINARE ({CATEGORIE[categoria]}):\n\n"
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: 0",
+            reply_markup=reply_markup
+        )
+
+    # SELEZIONE ARTICOLO RIMUOVI (aggiunge/rimuove dalla lista)
+    elif data.startswith("seleziona_rimuovi_"):
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono eliminare articoli!", show_alert=True)
+            return
+            
+        seriale = data[17:]
+        selezioni = context.user_data.get('selezioni_rimuovi', [])
+        
+        if seriale in selezioni:
+            selezioni.remove(seriale)
+        else:
+            selezioni.append(seriale)
+        
+        context.user_data['selezioni_rimuovi'] = selezioni
+        
+        # Ricrea la tastiera aggiornata
+        categoria = context.user_data.get('categoria_corrente_rimuovi', '')
+        articoli = get_articoli_per_stato('disponibile') + get_articoli_per_stato('usato') + get_articoli_per_stato('fuori_uso')
+        articoli_categoria = [a for a in articoli if a[1] == categoria]
+        
+        keyboard = []
+        articoli_categoria.sort(key=lambda x: x[0], reverse=True)
+        for art_seriale, cat, sede in articoli_categoria:
+            nome = f"{art_seriale} - {SEDI[sede]}"
+            if art_seriale in selezioni:
+                nome = f"✅ {nome}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_rimuovi_{art_seriale}")])
+        
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data=f"conferma_rimuovi_{categoria}")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"➖ Seleziona articoli da ELIMINARE ({CATEGORIE[categoria]}):\n\n"
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: {len(selezioni)}",
+            reply_markup=reply_markup
+        )
+
+    # CONFERMA RIMUOVI
+    elif data.startswith("conferma_rimuovi_"):
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono eliminare articoli!", show_alert=True)
+            return
+            
+        selezioni = context.user_data.get('selezioni_rimuovi', [])
+        
+        if not selezioni:
+            await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
+            return
+        
+        # Processa tutti gli articoli selezionati
         success_count = 0
         for seriale in selezioni:
-            if sposta_in_centrale(seriale):
+            articolo = get_articolo(seriale)
+            if articolo:
+                delete_articolo(seriale)
                 success_count += 1
         
-        await query.edit_message_text(f"✅ {success_count} articoli fuori uso spostati in CENTRALE!")
+        await query.edit_message_text(f"✅ {success_count} articoli eliminati dall'inventario!")
         
-        if 'selezioni_centrale_fuori_uso' in context.user_data:
-            del context.user_data['selezioni_centrale_fuori_uso']
+        # Pulisci i dati temporanei
+        if 'selezioni_rimuovi' in context.user_data:
+            del context.user_data['selezioni_rimuovi']
+        if 'categoria_corrente_rimuovi' in context.user_data:
+            del context.user_data['categoria_corrente_rimuovi']
 
-    # GESTIONE CENTRALE - INVENTARIO
-    elif data == "centrale_inventario":
-        articoli_centrale = get_articoli_in_centrale()
-        if not articoli_centrale:
-            await query.edit_message_text("🏢 **INVENTARIO CENTRALE**\n\n📦 Nessun articolo in centrale al momento")
-            return
-
-        articoli_organizzati = organizza_articoli_per_categoria([(a[0], a[1], a[2], a[3]) for a in articoli_centrale])
-        
-        msg = "🏢 **INVENTARIO CENTRALE**\n\n"
-        
-        usati_centrale = [a for a in articoli_centrale if a[3] == 'usato_centrale']
-        if usati_centrale:
-            msg += f"🔴 **USATI IN CENTRALE** ({len(usati_centrale)}):\n"
-            usati_organizzati = organizza_articoli_per_categoria([(a[0], a[1], a[2], a[3]) for a in usati_centrale])
-            
-            for categoria in ORDINE_CATEGORIE:
-                articoli_cat = usati_organizzati[categoria]
-                if articoli_cat:
-                    msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
-                    articoli_cat.sort(key=lambda x: x[0], reverse=True)
-                    for seriale, sede, _ in articoli_cat:
-                        msg += f"• {seriale}\n"
-            msg += "\n"
-        
-        fuori_uso_centrale = [a for a in articoli_centrale if a[3] == 'fuori_uso_centrale']
-        if fuori_uso_centrale:
-            msg += f"⚫ **FUORI USO IN CENTRALE** ({len(fuori_uso_centrale)}):\n"
-            fuori_uso_organizzati = organizza_articoli_per_categoria([(a[0], a[1], a[2], a[3]) for a in fuori_uso_centrale])
-            
-            for categoria in ORDINE_CATEGORIE:
-                articoli_cat = fuori_uso_organizzati[categoria]
-                if articoli_cat:
-                    msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
-                    articoli_cat.sort(key=lambda x: x[0], reverse=True)
-                    for seriale, sede, _ in articoli_cat:
-                        msg += f"• {seriale}\n"
-        
-        msg += f"\n📊 **RIASSUNTO CENTRALE:**\n"
-        msg += f"• 🔴 Usati: {len(usati_centrale)}\n"
-        msg += f"• ⚫ Fuori uso: {len(fuori_uso_centrale)}\n"
-        msg += f"• 📦 Totale: {len(articoli_centrale)}"
-        
-        await query.edit_message_text(msg)
-
-    # APPROVA UTENTE
+    # APPROVA UTENTE (UNO ALLA VOLTA)
     elif data.startswith("approva_"):
         if not is_admin(user_id):
             return
@@ -928,6 +1673,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
             
+        # Dopo l'approvazione, mostra se ci sono altre richieste
         richieste_rimanenti = get_richieste_in_attesa()
         if richieste_rimanenti:
             messaggio_aggiuntivo = f"\n\n📋 Ci sono ancora {len(richieste_rimanenti)} richieste in attesa.\nUsa nuovamente '👥 Gestisci Richieste' per continuare."
@@ -936,18 +1682,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         await query.edit_message_text(f"✅ Utente {user_id_approvare} approvato!{messaggio_aggiuntivo}")
 
-    # RIFIUTA UTENTE
+    # RIFIUTA UTENTE (UNO ALLA VOLTA)
     elif data.startswith("rifiuta_"):
         if not is_admin(user_id):
             return
             
         user_id_rifiutare = int(data[8:])
-        conn = sqlite3.connect(DATABASE_NAME)
+        conn = sqlite3.connect(DATABASE_NAME)  # ⬅️ USA LA COSTANTE
         c = conn.cursor()
         c.execute("DELETE FROM utenti WHERE user_id = ?", (user_id_rifiutare,))
         conn.commit()
         conn.close()
         
+        # Dopo il rifiuto, mostra se ci sono altre richieste
         richieste_rimanenti = get_richieste_in_attesa()
         if richieste_rimanenti:
             messaggio_aggiuntivo = f"\n\n📋 Ci sono ancora {len(richieste_rimanenti)} richieste in attesa.\nUsa nuovamente '👥 Gestisci Richieste' para continuare."
@@ -969,7 +1716,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(f"🏢 Seleziona sede per {CATEGORIE[categoria]}:", reply_markup=reply_markup)
 
-    # SELEZIONE SEDE PER AGGIUNTA
+    # SELEZIONE SEDE PER AGGIUNTA - MODIFICA ANCHE QUI
     elif data.startswith("nuovo_sede_"):
         sede = data[11:]
         categoria = context.user_data['nuova_categoria']
@@ -986,10 +1733,257 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Inserisci le 3 cifre:"
         )
 
-    # ... (altri handler per le altre sezioni rimangono invariati) ...
+    # GESTIONE CENTRALE - SPOSTA USATI
+    elif data == "centrale_sposta_usati":
+        articoli_usati = get_articoli_per_stato_centrale('usato', escludi_centrale=True)
+        if not articoli_usati:
+            await query.edit_message_text("❌ Nessun articolo usato da spostare in centrale (o tutti già in centrale)")
+            return
+
+        # Inizializza la lista delle selezioni
+        context.user_data['selezioni_centrale_usati'] = []
+        
+        keyboard = []
+        # ORDINA PER CODICE (dal basso all'alto)
+        articoli_usati.sort(key=lambda x: x[0], reverse=True)
+        for seriale, cat, sed in articoli_usati:
+            nome = f"{seriale} - {SEDI[sed]}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_usato_{seriale}")])
+        
+        # Aggiungi pulsante per conferma selezione
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_usati")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "📤 Seleziona articoli USATI da spostare in CENTRALE:\n\n"
+            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            "📝 Articoli selezionati: 0",
+            reply_markup=reply_markup
+        )
+
+    # SELEZIONE ARTICOLO USATO PER CENTRALE - FIX: AGGIUNGI SPUNTA
+    elif data.startswith("seleziona_centrale_usato_"):
+        seriale = data[24:]
+        selezioni = context.user_data.get('selezioni_centrale_usati', [])
+        
+        if seriale in selezioni:
+            selezioni.remove(seriale)
+        else:
+            selezioni.append(seriale)
+        
+        context.user_data['selezioni_centrale_usati'] = selezioni
+        
+        # Ricrea la tastiera aggiornata con le spunte
+        articoli_usati = get_articoli_per_stato_centrale('usato', escludi_centrale=True)
+        
+        keyboard = []
+        # ORDINA PER CODICE (dal basso all'alto)
+        articoli_usati.sort(key=lambda x: x[0], reverse=True)
+        for art_seriale, cat, sed in articoli_usati:
+            nome = f"{art_seriale} - {SEDI[sed]}"
+            # AGGIUNGI LA SPUNTA SE SELEZIONATO - FIX APPLICATO
+            if art_seriale in selezioni:
+                nome = f"✅ {nome}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_usato_{art_seriale}")])
+        
+        # Aggiungi pulsante per conferma selezione
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_usati")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "📤 Seleziona articoli USATI da spostare in CENTRALE:\n\n"
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: {len(selezioni)}",
+            reply_markup=reply_markup
+        )
+
+    # CONFERMA SPOSTAMENTO USATI IN CENTRALE - FIX: VERIFICA SELEZIONI
+    elif data == "conferma_centrale_usati":
+        selezioni = context.user_data.get('selezioni_centrale_usati', [])
+        
+        if not selezioni:
+            await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
+            return
+        
+        # Processa tutti gli articoli selezionati
+        success_count = 0
+        for seriale in selezioni:
+            if sposta_in_centrale(seriale):
+                success_count += 1
+        
+        await query.edit_message_text(f"✅ {success_count} articoli usati spostati in CENTRALE!")
+        
+        # Pulisci i dati temporanei
+        if 'selezioni_centrale_usati' in context.user_data:
+            del context.user_data['selezioni_centrale_usati']
+
+    # GESTIONE CENTRALE - SPOSTA FUORI USO
+    elif data == "centrale_sposta_fuori_uso":
+        articoli_fuori_uso = get_articoli_per_stato_centrale('fuori_uso', escludi_centrale=True)
+        if not articoli_fuori_uso:
+            await query.edit_message_text("❌ Nessun articolo fuori uso da spostare in centrale (o tutti già in centrale)")
+            return
+
+        # Inizializza la lista delle selezioni
+        context.user_data['selezioni_centrale_fuori_uso'] = []
+        
+        keyboard = []
+        # ORDINA PER CODICE (dal basso all'alto)
+        articoli_fuori_uso.sort(key=lambda x: x[0], reverse=True)
+        for seriale, cat, sed in articoli_fuori_uso:
+            nome = f"{seriale} - {SEDI[sed]}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_fuori_uso_{seriale}")])
+        
+        # Aggiungi pulsante per conferma selezione
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_fuori_uso")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "📤 Seleziona articoli FUORI USO da spostare in CENTRALE:\n\n"
+            "🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            "📝 Articoli selezionati: 0",
+            reply_markup=reply_markup
+        )
+
+    # SELEZIONE ARTICOLO FUORI USO PER CENTRALE - FIX: AGGIUNGI SPUNTA
+    elif data.startswith("seleziona_centrale_fuori_uso_"):
+        seriale = data[28:]
+        selezioni = context.user_data.get('selezioni_centrale_fuori_uso', [])
+        
+        if seriale in selezioni:
+            selezioni.remove(seriale)
+        else:
+            selezioni.append(seriale)
+        
+        context.user_data['selezioni_centrale_fuori_uso'] = selezioni
+        
+        # Ricrea la tastiera aggiornata con le spunte
+        articoli_fuori_uso = get_articoli_per_stato_centrale('fuori_uso', escludi_centrale=True)
+        
+        keyboard = []
+        # ORDINA PER CODICE (dal basso all'alto)
+        articoli_fuori_uso.sort(key=lambda x: x[0], reverse=True)
+        for art_seriale, cat, sed in articoli_fuori_uso:
+            nome = f"{art_seriale} - {SEDI[sed]}"
+            # AGGIUNGI LA SPUNTA SE SELEZIONATO - FIX APPLICATO
+            if art_seriale in selezioni:
+                nome = f"✅ {nome}"
+            keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_fuori_uso_{art_seriale}")])
+        
+        # Aggiungi pulsante per conferma selezione
+        keyboard.append([InlineKeyboardButton("✅ CONFERMA SELEZIONE", callback_data="conferma_centrale_fuori_uso")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "📤 Seleziona articoli FUORI USO da spostare in CENTRALE:\n\n"
+            f"🟢 Clicca sugli articoli che vuoi selezionare, poi clicca CONFERMA SELEZIONE\n"
+            f"📝 Articoli selezionati: {len(selezioni)}",
+            reply_markup=reply_markup
+        )
+
+    # CONFERMA SPOSTAMENTO FUORI USO IN CENTRALE - FIX: VERIFICA SELEZIONI
+    elif data == "conferma_centrale_fuori_uso":
+        selezioni = context.user_data.get('selezioni_centrale_fuori_uso', [])
+        
+        if not selezioni:
+            await query.answer("❌ Nessun articolo selezionato!", show_alert=True)
+            return
+        
+        # Processa tutti gli articoli selezionati
+        success_count = 0
+        for seriale in selezioni:
+            if sposta_in_centrale(seriale):
+                success_count += 1
+        
+        await query.edit_message_text(f"✅ {success_count} articoli fuori uso spostati in CENTRALE!")
+        
+        # Pulisci i dati temporanei
+        if 'selezioni_centrale_fuori_uso' in context.user_data:
+            del context.user_data['selezioni_centrale_fuori_uso']
+
+    # GESTIONE CENTRALE - INVENTARIO
+    elif data == "centrale_inventario":
+        articoli_centrale = get_articoli_in_centrale()
+        if not articoli_centrale:
+            await query.edit_message_text("🏢 **INVENTARIO CENTRALE**\n\n📦 Nessun articolo in centrale al momento")
+            return
+
+        # Organizza per categoria
+        articoli_organizzati = organizza_articoli_per_categoria([(a[0], a[1], a[2], a[3]) for a in articoli_centrale])
+        
+        msg = "🏢 **INVENTARIO CENTRALE**\n\n"
+        
+        # USATI IN CENTRALE
+        usati_centrale = [a for a in articoli_centrale if a[3] == 'usato_centrale']
+        if usati_centrale:
+            msg += f"🔴 **USATI IN CENTRALE** ({len(usati_centrale)}):\n"
+            usati_organizzati = organizza_articoli_per_categoria([(a[0], a[1], a[2], a[3]) for a in usati_centrale])
+            
+            for categoria in ORDINE_CATEGORIE:
+                articoli_cat = usati_organizzati[categoria]
+                if articoli_cat:
+                    msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                    # ORDINA PER CODICE (dal basso all'alto)
+                    articoli_cat.sort(key=lambda x: x[0], reverse=True)
+                    for seriale, sede, _ in articoli_cat:
+                        msg += f"• {seriale}\n"
+            msg += "\n"
+        
+        # FUORI USO IN CENTRALE
+        fuori_uso_centrale = [a for a in articoli_centrale if a[3] == 'fuori_uso_centrale']
+        if fuori_uso_centrale:
+            msg += f"⚫ **FUORI USO IN CENTRALE** ({len(fuori_uso_centrale)}):\n"
+            fuori_uso_organizzati = organizza_articoli_per_categoria([(a[0], a[1], a[2], a[3]) for a in fuori_uso_centrale])
+            
+            for categoria in ORDINE_CATEGORIE:
+                articoli_cat = fuori_uso_organizzati[categoria]
+                if articoli_cat:
+                    msg += f"\n**{CATEGORIE[categoria]}** ({len(articoli_cat)}):\n"
+                    # ORDINA PER CODICE (dal basso all'alto)
+                    articoli_cat.sort(key=lambda x: x[0], reverse=True)
+                    for seriale, sede, _ in articoli_cat:
+                        msg += f"• {seriale}\n"
+        
+        # RIASSUNTO
+        msg += f"\n📊 **RIASSUNTO CENTRALE:**\n"
+        msg += f"• 🔴 Usati: {len(usati_centrale)}\n"
+        msg += f"• ⚫ Fuori uso: {len(fuori_uso_centrale)}\n"
+        msg += f"• 📦 Totale: {len(articoli_centrale)}"
+        
+        await query.edit_message_text(msg)
+
+    # NUOVO: GESTIONE RICOSTRUZIONE DATABASE
+    elif data == "conferma_ricostruzione":
+        if not is_admin(user_id):
+            await query.answer("❌ Solo gli amministratori possono ricostruire il database!", show_alert=True)
+            return
+            
+        testo_inventario = context.user_data.get('inventario_da_caricare', '')
+        if not testo_inventario:
+            await query.edit_message_text("❌ Nessun testo inventario trovato!")
+            return
+            
+        # Esegui la ricostruzione
+        successo, messaggio = ricostruisci_database_da_inventario(testo_inventario)
+        
+        # Pulisci i dati temporanei
+        for key in ['azione', 'inventario_da_caricare']:
+            if key in context.user_data:
+                del context.user_data[key]
+                
+        await query.edit_message_text(messaggio)
+
+    elif data == "annulla_ricostruzione":
+        # Pulisci i dati temporanei
+        for key in ['azione', 'inventario_da_caricare']:
+            if key in context.user_data:
+                del context.user_data[key]
+                
+        await query.edit_message_text("❌ Ricostruzione database annullata.")
 
 # === ALLARME BOMBOLE ===
 async def controlla_allarme_bombole(context: ContextTypes.DEFAULT_TYPE):
+    """NUOVA VERSIONE: controlla allarme basato su TOTALE bombole (Erba + Centrale)"""
     bombole_totali = conta_bombole_disponibili()
 
     messaggio = None
@@ -1007,12 +2001,12 @@ async def controlla_allarme_bombole(context: ContextTypes.DEFAULT_TYPE):
             except:
                 pass
 
-# === SERVER FLASK ===
+# === SERVER FLASK PER RENDER ===
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 Bot Telegram Autoprotettori - ONLINE 🟢"
+    return "🤖 Bot Telegram Autoprotettori - ONLINE 🟢 - Keep-alive attivo!"
 
 @app.route('/health')
 def health():
@@ -1022,6 +2016,24 @@ def health():
 def ping():
     return f"PONG - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
+@app.route('/status')
+def status():
+    articoli = len(get_tutti_articoli())
+    bombole = conta_bombole_disponibili()
+    return f"Bot Active | Articoli: {articoli} | Bombole: {bombole} | Keep-alive: ✅"
+
+@app.route('/keep-alive')
+def keep_alive_endpoint():
+    return f"KEEP-ALIVE ACTIVE - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+@app.route('/backup-now')
+def backup_now():
+    """Endpoint per forzare un backup immediato"""
+    if backup_database_to_gist():
+        return "✅ Backup eseguito con successo!"
+    else:
+        return "❌ Errore durante il backup"
+
 def run_flask():
     app.run(host='0.0.0.0', port=10000, debug=False)
 
@@ -1029,9 +2041,31 @@ def run_flask():
 def main():
     print("🚀 Avvio Bot Autoprotettori Erba...")
     
+    # 🔄 RIPRISTINO AUTOMATICO ALL'AVVIO
+    if not restore_on_startup():
+        print("🔄 Inizializzazione database nuovo...")
+        init_db()
+    
+    # 🔒 VERIFICA INTEGRITÀ DATABASE
+    print("🔍 Verifica integrità database...")
+    if not check_database_integrity():
+        print("🔄 Ricreazione database di emergenza...")
+        emergency_recreate_database()
+    
+    # Avvia Flask in un thread separato
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     print("✅ Flask server started on port 10000")
+    
+    # 🔥 AVVIA IL SISTEMA KEEP-ALIVE ULTRA-AGGRESSIVO
+    keep_alive_thread = threading.Thread(target=keep_alive_aggressive, daemon=True)
+    keep_alive_thread.start()
+    print("✅ Sistema keep-alive ULTRA-AGGRESSIVO attivato! Ping ogni 5 minuti")
+    
+    # 🔄 AVVIA SCHEDULER BACKUP AUTOMATICO
+    backup_thread = threading.Thread(target=backup_scheduler, daemon=True)
+    backup_thread.start()
+    print("✅ Scheduler backup attivato! Backup ogni 25 minuti")
     
     application = Application.builder().token(BOT_TOKEN).build()
     
@@ -1042,7 +2076,13 @@ def main():
 
     print("🤖 Bot Autoprotettori Erba Avviato!")
     print("📍 Server: Render.com")
-    print("🟢 Status: ONLINE")
+    print("🟢 Status: ONLINE con keep-alive ultra-aggressivo")
+    print("💾 Database: SQLite3 con backup automatico")
+    print("👥 Admin configurati:", len(ADMIN_IDS))
+    print("⏰ Ping automatici ogni 5 minuti - Zero spin down! 🚀")
+    print("💾 Backup automatici ogni 25 minuti - Dati al sicuro! 🛡️")
+    print("🏠 Nuova categoria: Seconda Utenza aggiunta!")
+    print("📤 Nuova feature: Ricostruzione database da inventario!")
     
     application.run_polling()
 
