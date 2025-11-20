@@ -1761,7 +1761,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
 
-    # SELEZIONE ARTICOLO USATO PER CENTRALE - FIX: AGGIUNGI SPUNTA
+    # SELEZIONE ARTICOLO USATO PER CENTRALE
     elif data.startswith("seleziona_centrale_usato_"):
         seriale = data[24:]
         selezioni = context.user_data.get('selezioni_centrale_usati', [])
@@ -1781,7 +1781,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         articoli_usati.sort(key=lambda x: x[0], reverse=True)
         for art_seriale, cat, sed in articoli_usati:
             nome = f"{art_seriale} - {SEDI[sed]}"
-            # AGGIUNGI LA SPUNTA SE SELEZIONATO - FIX APPLICATO
+            # AGGIUNGI LA SPUNTA SE SELEZIONATO
             if art_seriale in selezioni:
                 nome = f"✅ {nome}"
             keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_usato_{art_seriale}")])
@@ -1797,7 +1797,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
 
-    # CONFERMA SPOSTAMENTO USATI IN CENTRALE - FIX: VERIFICA SELEZIONI
+    # CONFERMA SPOSTAMENTO USATI IN CENTRALE
     elif data == "conferma_centrale_usati":
         selezioni = context.user_data.get('selezioni_centrale_usati', [])
         
@@ -1845,7 +1845,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
 
-    # SELEZIONE ARTICOLO FUORI USO PER CENTRALE - FIX: AGGIUNGI SPUNTA
+    # SELEZIONE ARTICOLO FUORI USO PER CENTRALE
     elif data.startswith("seleziona_centrale_fuori_uso_"):
         seriale = data[28:]
         selezioni = context.user_data.get('selezioni_centrale_fuori_uso', [])
@@ -1865,7 +1865,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         articoli_fuori_uso.sort(key=lambda x: x[0], reverse=True)
         for art_seriale, cat, sed in articoli_fuori_uso:
             nome = f"{art_seriale} - {SEDI[sed]}"
-            # AGGIUNGI LA SPUNTA SE SELEZIONATO - FIX APPLICATO
+            # AGGIUNGI LA SPUNTA SE SELEZIONATO
             if art_seriale in selezioni:
                 nome = f"✅ {nome}"
             keyboard.append([InlineKeyboardButton(nome, callback_data=f"seleziona_centrale_fuori_uso_{art_seriale}")])
@@ -1881,7 +1881,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
 
-    # CONFERMA SPOSTAMENTO FUORI USO IN CENTRALE - FIX: VERIFICA SELEZIONI
+    # CONFERMA SPOSTAMENTO FUORI USO IN CENTRALE
     elif data == "conferma_centrale_fuori_uso":
         selezioni = context.user_data.get('selezioni_centrale_fuori_uso', [])
         
